@@ -1,0 +1,62 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "7/29/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(here)
+library(janitor)
+
+library(tidyverse)
+library(lubridate)
+```
+
+```{r}
+climate = read_csv(here("data", "mancos_precip.csv")) 
+
+clim = climate %>% 
+  mutate(date = mdy(date)) %>% 
+  filter(precip != "M" ) %>% 
+  filter(precip != "T" ) %>% 
+  mutate(month = month(date)) %>% 
+  mutate(month_lab = month(date, label = TRUE)) %>% 
+  mutate(day = day(date))%>% 
+  mutate(year = year(date)) %>% 
+  mutate(precip = as.numeric(precip)) %>% 
+  filter(!is.na(precip))
+
+july= clim %>% 
+  filter(month ==7) %>% 
+  mutate()
+
+aug= clim %>% 
+  filter(month ==8) %>% 
+  mutate()
+
+julyaug = clim %>% 
+  filter(month %in% 7:8) %>% 
+  mutate(days = case_when(
+    month == 8 ~ 31, 
+    TRUE ~ 0
+  )) %>% 
+  mutate(days = day + days) %>% 
+  filter(year <2022)
+
+ggplot(july, aes(x= as.factor(day), y= precip)) +
+  geom_boxplot()+
+  facet_wrap(~year)
+
+ggplot(aug, aes(x= as.factor(day), y= precip)) +
+  geom_boxplot()+
+  facet_wrap(~year)
+
+ggplot(julyaug, aes(x= as.factor(days), y= precip, color = precip)) +
+  geom_boxplot()+
+  facet_wrap(~year)
+```
+

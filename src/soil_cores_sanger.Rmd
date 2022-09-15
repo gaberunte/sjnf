@@ -1,0 +1,138 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phyloseq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(dada2)
+```
+
+
+```{r, eval = FALSE}
+consensus = read_csv(here("data", "sjnf_consensus_soilcores1.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+
+tiptaxa = assignTaxonomy(consensus$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+consensus_unite = consensus %>% 
+  bind_cols(tibble(as.data.frame(tiptaxa)))
+
+write_csv(consensus_unite, here("data", "sjnf_tiptaxa_sanger_contigs1.csv"))
+
+```
+
+```{r}
+consensus_unite = read_csv(here("data", "sjnf_tiptaxa_sanger_contigs1.csv")) %>% 
+  clean_names()
+
+tips = read_csv(here("data", "sjnf_contigs_soilcores1.csv")) %>% 
+  clean_names() %>% 
+  filter(!is.na(percent_gc)) %>% 
+  separate(name, c("sample")) %>% 
+  mutate(plate_number = str_sub(sample, 2,2)) %>% 
+  mutate(column = str_sub(sample, 3,str_length(sample)-1)) %>% 
+  mutate(row = str_sub(sample, str_length(sample),str_length(sample))) %>% 
+  relocate(row) %>% 
+  mutate(row = tolower(row)) %>% 
+  relocate(column) %>% 
+  relocate(plate_number) %>% 
+  mutate(plate_number = as.numeric(plate_number))%>% 
+  mutate(column = as.numeric(column)) %>% 
+  dplyr::select(1:3, sequence_list_name) %>% 
+  left_join(consensus_unite)  %>% 
+  rename(plate = plate_number)
+
+
+all_trees = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(str_sub(plot, 1, 4) == "POTR")
+
+tree_meta = all_trees %>% 
+  select(plot, tag) %>% 
+  mutate(elevation = tolower(str_sub(plot, 5, 5)))%>% 
+  mutate(site = tolower(str_sub(plot, 6, 6))) %>% 
+  select(!plot) %>% 
+  rename(tree= tag)
+
+core_ids = read_csv(here("data", "soil_core_treeids - Sheet1.csv")) %>% 
+  left_join(tree_meta, by = "tree") %>% 
+  rename(elevation = elevation.x) %>% 
+  rename(site = site.x) %>% 
+  mutate(elevation = case_when(
+    is.na(elevation) ~ elevation.y, 
+    TRUE ~ elevation
+  ))%>% 
+  mutate(site = case_when(
+    is.na(site) ~ site.y, 
+    TRUE ~ site
+  )) %>% 
+  select(1:5)
+
+
+morphs = read_csv(here("data", "soil_core_morphotyping - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>% 
+  left_join(tips) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(core_ids)
+
+seqs = morphs%>% 
+  filter(!is.na(class)) 
+
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+ggplot(seqs, aes(x=morphotype, fill = genus))+
+  geom_bar() +
+  facet_grid(rows = vars(elevation))
+
+ggplot(morphs, aes(x=morphotype, fill =morphotype))+
+  geom_bar()
+```
+
+```{r, eval = FALSE}
+still_missing = sample_locations %>% 
+  left_join(morph) %>% 
+  filter(morphotype != "x")%>% 
+  filter(morphotype != "BLANK") %>% 
+  filter(is.na(sequence))
+
+missing_but_done = read_csv(here("data", "SOS redone pcr - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  rename(plate_number = old_plate, column = old_column, row = old_row) %>% 
+  select(!4:6) %>% 
+  filter(amlified_y_n == "Y") 
+
+
+missing = still_missing %>% 
+  left_join(missing_but_done)%>% 
+  filter(is.na(amlified_y_n))  %>% 
+  select(1:5)
+
+write.csv(missing, here("data", "reruns_July22.csv"))
+```
+
+
+
+

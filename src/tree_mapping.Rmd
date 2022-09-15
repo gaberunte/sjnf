@@ -1,0 +1,97 @@
+---
+title: "Tree locations SJNF"
+author: "Gabe Runte"
+date: "9/07/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(sf)
+library(leaflet)
+library(raster)
+```
+
+```{r}
+trees = read_sf(here("gpx/waypoints/Points-point.shx")) %>% 
+  clean_names() %>% 
+  arrange(name)
+
+meas = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(!is.na(tag)) %>% 
+  dplyr::select(plot, tag) %>% 
+  mutate(elevation = str_sub(plot, 5,5)) %>% 
+  mutate(plot = str_sub(plot, 6,6)) %>% 
+  dplyr::relocate(elevation)
+
+map_trees = tibble(tag = c("1013", "751", "2431", "2143"), elevation = c("M", "M", "H", "H"), plot = c("B", "A", "E", "B")) #gabe checked using google earth
+
+
+num_trees = trees[1:61,] %>% 
+  rename(tag = name) %>% 
+  left_join(meas) %>% 
+  mutate(elevation = case_when(
+    tag == "1013" ~ "M", 
+    tag == "751" ~ "M", 
+    tag == "2431" ~ "H", 
+    tag == "2143" ~ "H", 
+    TRUE ~ elevation
+  ))%>% 
+  mutate(plot = case_when(
+    tag == "1013" ~ "B", 
+    tag == "751" ~ "A", 
+    tag == "2431" ~ "E", 
+    tag == "2143" ~ "B", 
+    TRUE ~ plot
+  ))
+
+
+cha_trees = trees[62:75,] %>% 
+  mutate(grtree = if_else(str_sub(name, 1,2)=="GR", 1, 0)) %>% 
+  mutate(elevation = case_when(
+    grtree == 1 ~ str_sub(name, 3,3),
+    grtree == 0 ~ str_sub(name, 1,1)
+  ))%>% 
+  mutate(plot = case_when(
+    grtree == 1 ~ str_sub(name, 4,4),
+    grtree == 0 ~ str_sub(name, 2,2)
+  ))%>% 
+  mutate(tag = case_when(
+    grtree == 0 ~ str_sub(name, 3,4), 
+    TRUE ~ name
+  ))
+
+all_trees = bind_rows(num_trees, cha_trees) %>% 
+  dplyr::select(tag, geometry, elevation, plot)
+
+centroid = all_trees %>% 
+  filter(elevation == "M") %>% 
+  st_centroid(centroid$geometry)
+
+centroids_elevation = all_trees %>%
+  group_by(elevation) %>% 
+  summarize(geometry = st_union(geometry)) %>% 
+  st_centroid
+
+sum1 = all_trees %>% 
+  group_by(elevation, plot) %>% 
+  summarize(n = n())
+
+
+  
+pal <- colorFactor(c("aquamarine4", "darkorange3",  "blueviolet"),
+                   domain = unique(all_trees$elevation))
+
+leaflet() %>% 
+  addCircleMarkers(data = centroids_elevation, radius= 15, color = ~pal(centroids_elevation$elevation),
+    stroke = FALSE, fillOpacity = .9) %>%
+  addCircleMarkers(data= all_trees, radius= 6, color = ~pal(all_trees$elevation),
+    stroke = FALSE, fillOpacity = .25) %>% 
+  addProviderTiles("Esri.WorldImagery")%>%
+  addScaleBar(position = "bottomright")
+
+```
+

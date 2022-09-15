@@ -1,0 +1,113 @@
+---
+title: "Exploring historic data"
+author: "Gabe Runte"
+date: "7/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+
+library(tidyverse)
+```
+
+
+```{r read in data}
+wp = read_csv(here("data", "San Juan NF water potentials.csv")) %>% 
+  clean_names()
+mort = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv"))%>% 
+  clean_names()
+
+```
+
+```{r}
+potrwp = wp %>% 
+  filter(species == "POTR") %>% 
+  mutate(elevation = factor(elevation, levels = c("L", "M", "H")))
+
+
+ggplot(potrwp, aes(x = elevation, y = predawn, fill = as.factor(year))) + 
+  geom_boxplot()
+
+ggplot(potrwp, aes(x = as.factor(year), y = predawn, fill = elevation)) + 
+  geom_boxplot() 
+ggplot(potrwp, aes(x = as.factor(year), y = midday, fill = elevation)) + 
+  geom_boxplot() 
+ggplot(potrwp, aes(x = as.factor(year), y = potdiff, fill = elevation)) + 
+  geom_boxplot() 
+
+
+ggplot(potrwp, aes(x = elevation, y = midday, fill = plot)) + 
+  geom_boxplot() +
+facet_wrap(~as.factor(year))
+
+potrlow = potrwp %>% 
+  filter(elevation == "L", month == "july")
+  
+
+ggplot(potrlow, aes(x= as.factor(year), y=predawn, fill = plot)) +
+  geom_boxplot()
+```
+ 
+ 
+```{r}
+potrwp$year.month <- paste(potrwp$year,potrwp$month,sep='.')
+unique(potrwp$year.month)
+data.2014 <- potrwp[potrwp$year==2014,]
+data.2018 <- potrwp[potrwp$year==2018&potrwp$month=='july',]
+data.2019 <- potrwp[potrwp$year==2019&potrwp$month=='july',]
+
+data.2014$predawn2018 <- data.2018$predawn[match(data.2014$new_tag,data.2018$new_tag)]
+data.2014$predawn2019 <- data.2019$predawn[match(data.2014$new_tag,data.2019$new_tag)]
+head(data.2014)
+
+plot(c(1,2),c(-1,0),type='n')
+arrows(rep(1,dim(data.2014)[1]),data.2014$predawn,rep(2,dim(data.2014)[1]),data.2014$predawn2019,code=0,lwd=2,col=c('firebrick','black','dodgerblue')[data.2014$elevation])
+
+plot(c(1,3),c(-2.5,-.5),type='n',xlab='Year',ylab='Predawn Water Potential',xaxt='n',las=1)
+for(i in 1:dim(data.2014)[1]){
+  if(data.2014$elevation[i]=='L'){linecol <- 'firebrick'}
+  if(data.2014$elevation[i]=='M'){linecol <- 'black'}
+  if(data.2014$elevation[i]=='H'){linecol <- 'dodgerblue'}
+  lines(c(1,2,3),c(data.2014$predawn[i],data.2014$predawn2018[i],data.2014$predawn2019[i]),col=linecol,lwd=2)
+}
+axis(side=1,at=c(1,2,3),labels=c('2014','2018','2019'))
+legend(x='bottomright',inset=0.05,legend=c('Low','Medium','High'),lwd=2,col=c('firebrick','black','dodgerblue'))
+
+
+potrwp %>% 
+  group_by(year, elevation, month) %>% 
+  summarize(n =n())
+
+```
+ 
+```{r}
+
+potr_print = potrwp %>% 
+  filter(year != 2018) %>% 
+  group_by(elevation, plot) 
+
+write_csv(potr_print, here("data", "sample_sites.csv"))
+
+
+```
+```{r}
+
+mort.ld = mort %>% 
+  mutate(living_dead = case_when(
+    x2021_mort == 100 ~ "D", 
+    x2022_mort == 100 ~ "D", 
+    TRUE ~living_dead
+  ))
+mpotr= mort.ld %>% 
+  filter(stringr::str_starts(plot, "POTR")) %>% 
+  group_by(plot, species, living_dead) %>% 
+  summarise(n = n())
+
+
+```
+ 
+

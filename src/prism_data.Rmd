@@ -1,0 +1,105 @@
+---
+title: "climate"
+author: "Gabe Runte"
+date: "7/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(devtools) #needed to download prism from github
+library(reshape2) ##melting dataframes
+library(tidyverse) #data wrangling
+library(raster) ##working with raster data
+library(prism) ##prism data access
+library(terra)
+library(lubridate)
+
+options(prism.path = "/Users/Gabe/Desktop/phd/prism")
+```
+
+```{r}
+get_prism_dailys( type = "ppt",  minDate = "2013-10-01", maxDate = "2021-10-14", keepZip = FALSE)
+
+ls_prism_data(name=TRUE)
+
+new_file<-c(1) ##change to corresponding file numbers
+RS <- prism_stack(ls_prism_data()[new_file,1]) ##raster file
+
+
+df <- data.frame(rasterToPoints(RS))
+daily.df <- melt(df, c("x", "y"))
+names(daily.df)[1:2] <- c("lon", "lat") #rename columns
+```
+
+```{r}
+minLat=37.472
+maxLat=37.473
+minLon=-108.1
+maxLon=-108.2
+
+daily.df.sj<-daily.df%>%filter(minLat < lat, lat < maxLat, minLon < lon, lon <maxLon)%>%
+  mutate(ppt = value)%>%
+  tibble() %>% 
+  dplyr::select(-value)
+
+dim(daily.df)
+dim(daily.df.sj)
+```
+ 
+
+ 
+```{r}
+day.ppt = tibble(folders = list.files("/Users/Gabe/Desktop/phd/prism")) %>% 
+  mutate(files = paste0(folders, ".bil")) %>% 
+  mutate(rasters = map2(folders, files, ~ rast(file.path("/Users/Gabe/Desktop/phd/prism", .x, .y))))
+```
+
+```{r}
+pts = tibble(lat = 37.472, long = -108.1) %>% 
+  vect(geom = c("long", "lat")) 
+
+crs(pts) = crs(day.ppt$rasters[[1]])
+```
+
+```{r}
+extract_raster_list = function(rasterlist, vector){
+  vector_copy = vector
+  for(i in 1:length(rasterlist)){
+    value_vect = terra::extract(rasterlist[[i]], vector_copy) %>% dplyr::select(-ID)
+    vector_copy = cbind(vector_copy, value_vect)
+  }
+  return(vector_copy)
+}
+```
+
+
+```{r}
+precip = extract_raster_list(day.ppt$rasters, pts) %>% 
+  as.data.frame() %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "file")  %>% 
+  mutate(date = lubridate::ymd(substr(file, 26, 33))) %>% 
+  tibble() %>% 
+  rename(ppt = V1)
+
+precip = precip %>% 
+  filter(!is.na(date))
+```
+
+
+```{r}
+
+precip  %>% 
+ggplot( aes(x=date, y=ppt, fill = ppt)) +
+  geom_bar(stat="identity")+ scale_fill_viridis_c(option = "G",direction = -1, name = "Precipitation (mm)") +
+    labs(x = "Date",
+         y = "Precipitation (mm)") +
+  theme_bw()+scale_x_date(date_labels = "%b %Y")
+  #ggsave(here("figures", "precip_bcdf.pdf"), width = 7, height = 5)
+```
+
+
+
