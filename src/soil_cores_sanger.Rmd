@@ -135,7 +135,7 @@ write.csv(missing, here("data", "reruns_July22.csv"))
 
 
 ```{r}
-redo_tips = tips %>% 
+redo_tips = morphs %>% 
  filter(is.na(phylum))
 write_csv(redo_tips, here("data","redo_sangertips.csv"))
 ```
