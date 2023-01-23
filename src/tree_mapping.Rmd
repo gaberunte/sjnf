@@ -13,6 +13,8 @@ library(here)
 library(sf)
 library(leaflet)
 library(raster)
+library(janitor)
+library(leaflet.opacity)
 ```
 
 ```{r}
@@ -90,8 +92,11 @@ leaflet() %>%
     stroke = FALSE, fillOpacity = .9) %>%
   addCircleMarkers(data= all_trees, radius= 6, color = ~pal(all_trees$elevation),
     stroke = FALSE, fillOpacity = .25) %>% 
-  addProviderTiles("Esri.WorldImagery")%>%
+  addProviderTiles("Esri.WorldImagery", layerId = "world")%>%
   addScaleBar(position = "bottomright")
 
+
+ #Esri.NatGeoWorldMap
+# Esri.WorldImagery
 ```
 
