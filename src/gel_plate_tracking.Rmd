@@ -1,0 +1,95 @@
+---
+title: "Gel plates"
+author: "Gabe Runte"
+date: "2023-02-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+```
+
+```{r}
+
+gel_to_seq = function(pass_string, sjnf_plate, n_samples = 96, new_plate_start, start_at = 0, multichannel = T){
+  
+  if(multichannel == T){
+    
+    plateorder = c(rep(c(1, 2), 8), rep(c(3, 4), 8),rep(c(5, 6), 8), 
+  rep(c(7, 8), 8),rep(c(9, 10), 8),rep(c(11, 12), 8))
+  } else{plateorder = rep(1:12, each = 8)}
+  
+  plateorder = plateorder[1:n_samples]
+  
+  sampleset = tibble(pass_string, column = plateorder) %>% 
+    arrange(column) %>% 
+    mutate(well = rep(LETTERS[seq(1, 8)], 12)) %>% 
+    filter(pass_string == 1) %>% 
+    mutate(position = start_at + seq(0:(length(pass_string)-1))) %>% 
+    rename(amp_success = pass_string, old_well = well, old_column = column)
+    
+  
+  newplate = tibble(
+    new_column = rep(rep(1:12, each = 8), 2),
+    new_row = rep(rep(LETTERS[seq(1, 8)], 12), 2), 
+    position = seq(1:192)) %>% 
+    mutate(new_plate = c(rep(paste("plate_", new_plate_start, sep = ""), 96), 
+                     rep(paste("plate_", new_plate_start+1, sep = ""), 96)),
+           sjnf_plate = sjnf_plate) %>% 
+    right_join(sampleset) %>% 
+    select(!position)
+  
+  return(newplate)
+}
+
+```
+
+```{r, eval = F}
+teststring =  rbinom(rep(1, 96), 1, 0.5)
+
+plate2 = gel_to_seq(teststring, start_at = 67)
+
+sjnf1 = c(1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,0,1,0,0,0,1,1,1,
+          1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,0,0,
+          1,1,0,1,0,0,0,1,1,1,1,0,1,0,0,0,1,1,1,1,1,1,1,1,
+          0,1,1,1,1,0,0,0,1,0,1,1,1,0,1,0,1,1,1,1,0,0,0,0)
+
+length(sjnf1)
+
+sjnf1_cleaned = gel_to_seq(sjnf1)
+```
+
+```{r}
+plate01 = read_csv(here("data/gel_images", "gel_success_plate1 - Sheet1.csv"))
+plate06 = read_csv(here("data/gel_images", "gel_success_plate6 - Sheet1.csv"))
+plate03 = read_csv(here("data/gel_images", "gel_success_plate3 - Sheet1.csv"))
+plate05 = read_csv(here("data/gel_images", "gel_success_plate5 - Sheet1.csv"))
+
+plate02 = read_csv(here("data/gel_images", "gel_success_plate2 - Sheet1.csv"))
+plate04 = read_csv(here("data/gel_images", "gel_success_plate4 - Sheet1.csv"))
+plate09 = read_csv(here("data/gel_images", "gel_success_plate9 - Sheet1.csv"))
+
+plate01_success = gel_to_seq(plate01$success, sjnf_plate = 1, new_plate_start = 1)
+plate06_success = gel_to_seq(plate06$success, sjnf_plate = 6, new_plate_start = 1, start_at = nrow(plate01_success))
+plate03_success = gel_to_seq(plate03$success, sjnf_plate = 3, new_plate_start = 2, start_at = (nrow(plate01_success)+nrow(plate06_success)-96))
+plate05_success = gel_to_seq(plate03$success, sjnf_plate = 5, new_plate_start = 2, start_at = (nrow(plate01_success)+nrow(plate06_success) + nrow(plate03_success) -96))
+
+plate02_success = gel_to_seq(plate02$success, sjnf_plate = 2, new_plate_start = 3)
+plate04_success = gel_to_seq(plate04$success, sjnf_plate = 4, new_plate_start = 3, start_at = nrow(plate02_success))
+plate09_success = gel_to_seq(plate09$success, sjnf_plate = 9, new_plate_start = 4, start_at = (nrow(plate02_success)+nrow(plate04_success)-96))
+```
+
+```{r}
+# successes = dplyr::bind_rows(plate01_success, plate06_success, plate03_success, plate05_success) %>% 
+#   select(!amp_success)
+
+successes = dplyr::bind_rows(plate02_success, plate04_success, plate09_success) %>% 
+  select(!amp_success) %>% 
+  mutate(ordername = paste("sjnf", "p", sjnf_plate, "c", old_column, "r", old_well, sep= "_"))
+
+#write_csv(successes, here("data", "sequencing_sheet_cores_june2023.csv"))
+```
+

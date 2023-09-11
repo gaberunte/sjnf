@@ -1,0 +1,179 @@
+---
+title: "Dissected samples plate processing"
+author: "Gabe Runte"
+date: "2023-02-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+```
+
+```{r}
+
+
+gel_to_seq = function(pass_string, sjnf_plate, n_samples = 96, new_plate_start, start_at = 0, multichannel = T){
+  
+  if(multichannel == T){
+    
+    plateorder = c(rep(c(1, 2), 8), rep(c(3, 4), 8),rep(c(5, 6), 8), 
+  rep(c(7, 8), 8),rep(c(9, 10), 8),rep(c(11, 12), 8))
+  } else{plateorder = rep(1:12, each = 8)}
+  
+  plateorder = plateorder[1:n_samples]
+  
+  sampleset = tibble(pass_string, column = plateorder) %>% 
+    arrange(column) %>% 
+    mutate(well = rep(LETTERS[seq(1, 8)], 12)) %>% 
+    filter(pass_string == 1) %>% 
+    mutate(position = start_at + seq(0:(length(pass_string)-1))) %>% 
+    rename(amp_success = pass_string, old_well = well, old_column = column)
+    
+  
+  newplate = tibble(
+    new_column = rep(rep(1:12, each = 8), 2),
+    new_row = rep(rep(LETTERS[seq(1, 8)], 12), 2), 
+    position = seq(1:192)) %>% 
+    mutate(new_plate = c(rep(paste("dmc_", new_plate_start, sep = ""), 96), 
+                     rep(paste("dmc_", new_plate_start+1, sep = ""), 96)),
+           sjnf_plate = sjnf_plate) %>% 
+    right_join(sampleset) %>% 
+    select(!position)
+  
+  return(newplate)
+}
+
+```
+
+```{r}
+
+#updated reading
+D01_string = c(
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,1,0,1,1,0,1,0,1,
+          0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,1,0,0,0,0,
+          0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,1,0,0,1,0,0,1,0,0
+)
+
+
+firstset = gel_to_seq(D01_string, start_at = 1, new_plate_start = 1, sjnf_plate = "D01")
+#write_csv(firstset, here("data", "dissected_pcrsuccesses_D01.csv"))
+```
+
+
+```{r}
+D02_string = c(
+          0,0,0,1,0,0,0,0,1,1,1,1,0,0,1,1,0,1,1,1,0,0,0,0,
+          0,0,1,0,1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1,
+          0,0,0,1,0,0,0,0,1,0,0,1,0,0,0,0,1,1,1,0,0,1,1,0,
+          1,0,0,1,1,1,1,1,1,1,0,1,1,1,1,0,0,0,0,1,0,0,1,0
+)
+d02_set = gel_to_seq(D02_string, start_at = 1, new_plate_start = 2, sjnf_plate = "D02")
+
+D03_string = c(
+          1,0,1,0,0,0,0,0,1,0,0,1,1,0,0,0,1,0,0,1,0,1,1,0,
+          1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,1,0,1,0,0,0,1,0,1,0,1,0,0,0,0,1,1,0,1,1,
+          0,1,1,0,0,0,1,1,1,0,0,0,1,0,0,1,0,1,1,0,1,0,0,0
+)
+d03_set = gel_to_seq(D03_string, start_at = length(d02_set$amp_success)+1, new_plate_start = 2, sjnf_plate = "D03")
+
+D04_string = c(
+          0,0,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,0,1,0,1,1,1,1,
+          0,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,1,0,1,0,1,0,0,1,0,1,0,0,0,1,1,1,
+          1,1,0,0,0,0,0,0,0,1,1,1,0,1,0,0,0,1,0,0,0,0,0,0
+)
+d04_set = gel_to_seq(D04_string, start_at = length(d02_set$amp_success)+length(d03_set$amp_success)+1, new_plate_start = 2, sjnf_plate = "D04")
+
+D05_string = c(
+          0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1,1,0,1,
+          0,0,0,1,0,1,0,1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,1,1,0,0,0,
+          0,0,0,1,0,0,1,0,0,1,1,1,0,1,1,1,1,1,0,1,1,1,0,0
+)
+d05_set = gel_to_seq(D05_string, start_at = length(d04_set$amp_success[d04_set$new_plate=="dmc_3"]), new_plate_start = 3, sjnf_plate = "D05")
+
+
+early_mayseqs = bind_rows(d02_set, d03_set, d04_set, d05_set)
+
+#write_csv(early_mayseqs, here("data", "early_mayseqs_2023.csv"))
+
+```
+
+```{r}
+D06_string = c(
+          1,0,1,0,0,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,1,1,0,1,
+          0,1,0,1,0,0,1,0,1,1,0,0,0,0,0,1,0,1,0,0,1,1,1,0,
+          1,1,1,1,1,0,0,0,0,0,1,0,1,1,1,0,1,1,0,1,1,0,1,1,
+          1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1
+)
+d06_set = gel_to_seq(D06_string, start_at = 1, new_plate_start = 4, sjnf_plate = "D06")
+
+D07_string = c(
+          1,1,0,0,0,0,1,0,1,0,1,0,1,0,1,0,0,0,0,0,0,1,1,0,
+          1,1,1,0,0,0,0,0,0,1,0,1,1,0,1,1,1,0,1,0,1,1,0,1,
+          1,1,1,0,0,1,1,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1,0,0,
+          1,1,1,1,1,1,0,0,1,0,0,1,1,0,1,1,0,0,0,1,1,0,0,0
+)
+d07_set = gel_to_seq(D07_string, start_at = length(d06_set$amp_success[d06_set$amp_success=="1"])+1, new_plate_start = 4, sjnf_plate = "D07")
+
+#the below is not yet updated/accurate
+D0607redo_string = c(
+          1,1,0,0,0,0,1,0,1,0,1,0,1,0,1,0,0,0,0,0,0,1,1,0,
+          1,1,1,0,0,0,0,0,0,1,0,1,1,0,1,1,1,0,1,0,1,1,0,1,
+          1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+d06_07_redo_set = gel_to_seq(D0607redo_string, start_at = 16, new_plate_start = 5, sjnf_plate = "D06_07_redos")
+
+bailey_harvest_string = c(
+          0,1,0,1,0,0,1,1,0,1,1,1,0,1,0,1,0,1,0,0,0,0,1,0,
+          1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,0,1,0,1,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+bailey_harvest = gel_to_seq(bailey_harvest_string, start_at = 41, new_plate_start = 5, sjnf_plate = "bailey_harvest")
+
+
+all_august23 = bind_rows(d06_set, d07_set, d06_07_redo_set, bailey_harvest)
+#write_csv(all_august23, here("data", "august23_seqs.csv"))
+```
+
+```{r}
+#julyseqs = bind_rows(d06_set, d07_set, d08_set, d09_set, d10_set)
+
+
+d06_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success)
+
+d06_long = tibble(
+  sjnf_plate = "D06",
+  old_column = rep(1:12,each = 8),
+  old_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)
+) %>% 
+  left_join(d06_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success))
+
+d07_long = tibble(
+  sjnf_plate = "D07",
+  old_column = rep(1:12,each = 8),
+  old_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)
+) %>% 
+  left_join(d07_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success))
+
+redos = d06_long %>% 
+  bind_rows(d07_long) %>% 
+  filter(is.na(amp_success)) %>% 
+  mutate(new_column = rep(1:12,each = 8, length.out = 96)[1:length(amp_success)]) %>% 
+  mutate(new_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)[1:length(amp_success)])
+
+#write_csv(redos, here("data", "d0607_redos.csv"))
+
+```
+
+

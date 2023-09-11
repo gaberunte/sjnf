@@ -1,0 +1,56 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "2023-04-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(janitor)
+library(here)
+library(tidyverse)
+library(googlesheets4)
+```
+
+```{r}
+all_sheets = gs4_find()
+
+tip_sheets = gs4_get(all_sheets$id[all_sheets$name== "Copy of sjnf_tips"])
+
+sheet_names = tip_sheets$sheets$name
+```
+
+```{r}
+sheets = list()
+
+for(i in 1:length(sheet_names)){
+  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "Copy of sjnf_tips"], sheet = sheet_names[i])
+  
+  sheets[[i]] = spare_tib
+}
+
+```
+
+```{r}
+
+megasheet = tibble(data.frame(sheets[1])) %>% 
+  clean_names() %>% 
+  mutate(tree_id = as.character(tree_id))
+
+for(i in 2:length(sheets)){
+  upnext = tibble(data.frame(sheets[i])) %>% 
+  clean_names()%>% 
+  mutate(tree_id = as.character(tree_id))
+  
+  megasheet = bind_rows(megasheet, upnext)
+}
+
+meta = megasheet %>% 
+  filter(!is.na(tree_id)) %>% 
+  filter(!is.na(rna)) 
+
+write_csv(meta, here("data", "field_tips.csv"))
+```
+

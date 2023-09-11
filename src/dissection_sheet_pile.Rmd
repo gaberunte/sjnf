@@ -1,0 +1,56 @@
+---
+title: "Google sheets piler for tip dissections"
+author: "Gabe Runte"
+date: "2023-04-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(janitor)
+library(here)
+library(tidyverse)
+library(googlesheets4)
+```
+
+```{r}
+all_sheets = gs4_find()
+
+tip_sheets = gs4_get(all_sheets$id[all_sheets$name== "sjnf_tipdissections"])
+
+sheet_names = tip_sheets$sheets$name
+```
+
+```{r}
+sheets = list()
+
+for(i in 1:length(sheet_names)){
+  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "sjnf_tipdissections"], sheet = sheet_names[i])
+  
+  sheets[[i]] = spare_tib
+}
+
+```
+
+```{r}
+
+megasheet = tibble(data.frame(sheets[1])) %>% 
+  clean_names()  %>% 
+    mutate(sample = as.character(sample)) %>% 
+    select(1:4)
+
+for(i in 2:length(sheets)){
+  upnext = tibble(data.frame(sheets[i])) %>% 
+  clean_names() %>% 
+    mutate(sample = as.character(sample)) %>% 
+    select(1:4)
+  
+  megasheet = bind_rows(megasheet, upnext)
+}
+megasheet_cleaned = megasheet %>% 
+  filter(!is.na(sample))
+
+#write_csv(megasheet_cleaned, here("data", "dissect_samplesheet.csv"))
+```
+

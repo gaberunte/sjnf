@@ -1,0 +1,334 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r}
+consensus = read_csv(here("data/sanger", "sjnf_comboset_consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here("data/sanger", "sjnf_comboset_contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here("data/sanger", "sjnf_comboset_long.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  select(!sequence_list_name) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  )) %>% 
+  select(!original_seq)%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence))
+
+# taxa_set = metadata %>% 
+#   select(name, percent_hq, post_trim_length, sequence, sequence_list_name) 
+# 
+# unite_set = taxa_set %>% 
+#   select(sequence, sequence_list_name) %>% 
+#   filter(is.na(sequence_list_name)) %>% 
+#   bind_rows(consensus) %>% 
+#   filter(str_length(sequence)>50) # only taking sequences >50bp long
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+unique_sequences = unique(metadata$sequence)
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(sequence = rownames(tiptaxa))
+#write_csv(unite_taxa, here("data", "all_unite_taxa_tips.csv"))
+```
+
+
+```{r}
+unite_taxa = read_csv( here("data", "all_unite_taxa_tips.csv")) 
+
+field_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  rename(sample = dna)
+dissected_tips = read_csv(here("data", "dissect_samplesheet.csv")) %>% 
+  mutate(sample = as.numeric(sample)) %>% 
+  mutate(row = toupper(row))
+
+tip_seqs = metadata %>% 
+  left_join(unite_taxa) %>% 
+  mutate(samset = case_when(
+    str_sub(name, 6,6) == "p" ~ "cores",
+    str_sub(name, 6,6) == "D" ~ "branches"
+  ))
+
+cores = tip_seqs %>% 
+  filter(samset == "cores") %>% 
+  separate(name, into = c("sjnf", "p", "plate", "c", "column", "r", "row")) %>% 
+  select(!sjnf) %>% select(!p) %>% select(!c) %>% select(!r) %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column))
+
+branches = tip_seqs %>% 
+  filter(samset == "branches")%>% 
+  separate(name, into = c("sjnf", "plate",  "column", "row")) %>% 
+  select(!sjnf)%>% 
+  mutate(column = as.numeric(column)) %>% 
+  mutate(row = case_when(
+    row == 1 ~ "A",
+    TRUE ~ row
+  )) %>% 
+  left_join(dissected_tips) %>% 
+  left_join(field_tips %>% 
+              select(!c(rna, time_date)))
+
+```
+
+```{r}
+all_trees = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(str_sub(plot, 1, 4) == "POTR") 
+
+tree_meta = all_trees %>% 
+  select(plot, tag) %>% 
+  mutate(elevation = tolower(str_sub(plot, 5, 5)))%>% 
+  mutate(site = tolower(str_sub(plot, 6, 6))) %>% 
+  select(!plot) %>% 
+  rename(tree= tag) %>% 
+  rename(tree_id = tree)
+
+branch_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  select(site, tree_id, direction, dna) %>% 
+  rename(sample = dna) %>% 
+  mutate(elevation = tolower(str_sub(site, 1,1)))%>% 
+  mutate(site = tolower(str_sub(site, 2,2)))
+
+core_ids = read_csv(here("data", "soil_core_treeids - Sheet1.csv")) %>%
+  left_join(tree_meta %>% 
+              rename(tree = tree_id), by = "tree") %>%
+  rename(elevation = elevation.x) %>%
+  rename(site = site.x) %>%
+  mutate(elevation = case_when(
+    is.na(elevation) ~ elevation.y,
+    TRUE ~ elevation
+  ))%>%
+  mutate(site = case_when(
+    is.na(site) ~ site.y,
+    TRUE ~ site
+  )) %>%
+  select(1:5) %>%
+  mutate(row = toupper(row)) %>%
+  mutate(plate = as.numeric(plate))
+
+
+core_morphs = read_csv(here("data", "soil_core_morphotyping - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>%
+  mutate(row = toupper(row)) %>% 
+  left_join(cores) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(core_ids) %>% 
+  filter(!is.na(percent_hq))
+
+branch_morphs = read_csv(here("data", "dissect_samplesheet.csv")) %>% 
+  clean_names() %>% 
+  mutate(row = toupper(row)) %>% 
+  left_join(branches) %>% 
+  filter(!is.na(percent_hq))  %>% 
+  left_join(branch_tips %>% 
+              select(!site)) %>% 
+  filter(!is.na(Genus))
+
+
+```
+
+```{r}
+total = core_morphs %>%
+  mutate(plate = as.character(plate)) %>% 
+  bind_rows(branch_morphs) %>% 
+  clean_names()
+
+#write_csv(total, here("data", "sjnf_total_tipseqs.csv"))
+```
+
+
+```{r}
+
+doubles = core_morphs %>%
+  filter(!Genus %in% branch_morphs$Genus) %>% 
+  mutate(plate = as.character(plate)) %>% 
+  bind_rows(branch_morphs) %>% 
+  clean_names()
+
+
+ggplot(total, aes(x = elevation, fill = genus))+
+  geom_bar() +
+  facet_wrap(~samset)
+
+ggplot(branch_morphs, aes(x = direction, fill = Genus))+
+  geom_bar() +
+  facet_wrap(~tree_id)
+ggplot(core_morphs, aes(x = elevation, fill = Genus))+
+  geom_bar()
+```
+```{r}
+ggplot(branch_morphs, aes(x = direction, fill = Genus))+
+  geom_bar() +
+  facet_wrap(~tree_id)
+```
+
+
+
+```{r}
+core_sum = core_morphs %>% 
+  clean_names() %>% 
+  group_by(genus, elevation) %>% 
+  summarise(n = n()) %>% 
+  left_join(core_morphs%>% 
+  clean_names() %>% 
+  group_by(elevation) %>% 
+  summarise(n_elev = n())) %>% 
+  mutate(pct_elev = n/n_elev) %>% 
+  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev.")))
+
+
+core_plot=core_sum %>% 
+         filter(pct_elev >0.05)
+
+ggplot(core_plot, aes(genus, y = pct_elev, fill = genus))+
+  geom_bar(stat="identity")+
+  facet_grid(rows = vars(elevation))+
+  geom_text(aes(label = n), vjust = 1.5, colour = "white")+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(core_plot$genus))+
+  theme_minimal()+
+  labs(
+    x = "Genus",
+    y = "Relative abundance",
+    title = "Soil cores"
+  )
+
+#ggsave(here("figures", "core_genus.png"), width = 14, height = 10)
+
+
+branch_sum = branch_morphs %>% 
+  clean_names() %>% 
+  group_by(genus, elevation) %>% 
+  summarise(n = n()) %>% 
+  left_join(branch_morphs%>% 
+  clean_names() %>% 
+  group_by(elevation) %>% 
+  summarise(n_elev = n())) %>% 
+  mutate(pct_elev = n/n_elev)%>% 
+  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev.")))
+
+
+
+
+ggplot(branch_sum %>% 
+         filter(pct_elev >0.05) %>% 
+         filter(!is.na(elevation)), aes(genus, y = pct_elev, fill = genus))+
+  geom_bar(stat="identity")+
+  facet_grid(rows = vars(elevation))+
+  geom_text(aes(label = n), vjust = 1.5, colour = "white")+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_sum$genus))+
+  theme_minimal()+
+  labs(
+    x = "Genus",
+    y = "Abundance",
+    title = "Root branches"
+  )
+```
+
+What is the composition of the control root tips that are sequencing? This would be replicate 6 below. 
+```{r}
+
+branch_rep = branch_morphs %>% 
+  clean_names() %>% 
+  group_by(genus, replicate) %>% 
+   summarise(n = n()) 
+
+ggplot(branch_rep, aes(replicate, y = n, fill = genus))+
+  geom_bar(stat="identity")+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_rep$genus))+
+  theme_minimal()+
+  labs(
+    x = "Replicate",
+    y = "Abundance"
+  )
+
+
+ggplot(branch_morphs, aes(as.factor(column), fill = Genus))+
+  geom_bar()+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_morphs$Genus))+
+  theme_minimal()+
+  labs(
+    x = "Replicate",
+    y = "Abundance"
+  )+
+  facet_grid(rows = vars(plate))
+```
+ different root branches that we are pulling up all the same thing? If so, should see only one genus per bar.
+```{r}
+
+branch_comp = branch_morphs %>% 
+  clean_names() %>% 
+  mutate(tree_direction = paste(tree_id, direction, sep = ""))
+
+ggplot(branch_comp %>% 
+         filter(!is.na(genus)), aes(tree_direction, fill = genus))+
+  geom_bar()+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_comp$genus))+
+  theme_minimal()+
+  labs(
+    x = "Tree/Direction",
+    y = "Abundance"
+  )+
+  facet_wrap(~elevation)
+
+ggplot(branch_comp %>% 
+         filter(!is.na(genus)), aes(tree_direction, fill = genus))+
+  geom_bar()+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_comp$genus))+
+  theme_minimal()+
+  labs(
+    x = "Tree/Direction",
+    y = "Abundance"
+  )
+
+ggplot(branch_comp %>% 
+         filter(!is.na(genus)), aes(tree_direction, fill = genus))+
+  geom_bar(position = "fill")+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_comp$genus))+
+  theme_minimal()+
+  labs(
+    x = "Tree/Direction",
+    y = "Abundance"
+  )
+```
+
+
+

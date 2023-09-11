@@ -1,0 +1,62 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "2023-02-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+```
+
+```{r}
+
+gel_to_seq = function(pass_string, n_samples = 96, start_at = 1, multichannel = T){
+  
+  if(multichannel == T){
+    
+    plateorder = c(rep(c(1, 2), 8), rep(c(3, 4), 8),rep(c(5, 6), 8), 
+  rep(c(7, 8), 8),rep(c(9, 10), 8),rep(c(11, 12), 8))
+  } else{plateorder = rep(1:12, each = 8)}
+  
+  plateorder = plateorder[1:n_samples]
+  
+  sampleset = tibble(pass_string, column = plateorder) %>% 
+    arrange(column) %>% 
+    mutate(well = rep(LETTERS[seq(1, 8)], 12)) %>% 
+    filter(pass_string == 1) %>% 
+    mutate(position = start_at + seq(0:(length(pass_string)-1))) %>% 
+    rename(amp_success = pass_string, old_well = well, old_column = column)
+    
+  
+  newplate = tibble(
+    new_column = rep(rep(1:12, each = 8), 2),
+    new_row = rep(rep(LETTERS[seq(1, 8)], 12), 2), 
+    position = seq(1:192)) %>% 
+    mutate(plate = c(rep("plate_1", 96), rep("plate_2", 96))) %>% 
+    right_join(sampleset) %>% 
+    select(!position)
+  
+  return(newplate)
+}
+
+```
+
+```{r}
+teststring =  rbinom(rep(1, 96), 1, 0.5)
+
+plate2 = gel_to_seq(teststring, start_at = 67)
+
+sjnf1 = c(1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,0,1,0,0,0,1,1,1,
+          1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,0,0,
+          1,1,0,1,0,0,0,1,1,1,1,0,1,0,0,0,1,1,1,1,1,1,1,1,
+          0,1,1,1,1,0,0,0,1,0,1,1,1,0,1,0,1,1,1,1,0,0,0,0)
+
+length(sjnf1)
+
+sjnf1_cleaned = gel_to_seq(sjnf1)
+```
+
+

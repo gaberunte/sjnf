@@ -1,0 +1,184 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+#library(phyloseq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(dada2)
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, eval = FALSE}
+consensus = read_csv(here("data/sanger", "sjnf_assembly1_consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here("data/sanger", "sjnf_assembly1_contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here("data/sanger", "sjnf_sequences_long.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  select(!sequence_list_name) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  ))
+
+taxa_set = metadata %>% 
+  select(name, percent_hq, post_trim_length, sequence, sequence_list_name) %>% 
+  filter(percent_hq>2)
+
+unite_set = taxa_set %>% 
+  select(sequence, sequence_list_name) %>% 
+  filter(is.na(sequence_list_name)) %>% 
+  bind_rows(consensus) %>% 
+  filter(str_length(sequence)>50) # only taking sequences >50bp long
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+
+tiptaxa = assignTaxonomy(unite_set$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+tip_seqs = unite_set %>% 
+  bind_cols(tibble(as.data.frame(tiptaxa))) %>% 
+  right_join(taxa_set)
+
+
+
+
+#write_csv(tip_seqs, here("data", "sjnf_rb_tip_seqs.csv"))
+
+```
+
+```{r}
+tips = read_csv(here("data", "sjnf_rb_tip_seqs.csv")) %>% 
+  clean_names() %>% 
+  separate(name, c("project", "platex", "plate", "columnx", "column", "rowx", "row")) %>% 
+  select(-c(project, platex, columnx, rowx, percent_hq, post_trim_length)) %>% 
+  relocate(plate, column, row) %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column))
+
+
+all_trees = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(str_sub(plot, 1, 4) == "POTR") 
+
+tree_meta = all_trees %>% 
+  select(plot, tag) %>% 
+  mutate(elevation = tolower(str_sub(plot, 5, 5)))%>% 
+  mutate(site = tolower(str_sub(plot, 6, 6))) %>% 
+  select(!plot) %>% 
+  rename(tree= tag)
+
+core_ids = read_csv(here("data", "soil_core_treeids - Sheet1.csv")) %>% 
+  left_join(tree_meta, by = "tree") %>%
+  rename(elevation = elevation.x) %>% 
+  rename(site = site.x) %>% 
+  mutate(elevation = case_when(
+    is.na(elevation) ~ elevation.y, 
+    TRUE ~ elevation
+  ))%>% 
+  mutate(site = case_when(
+    is.na(site) ~ site.y, 
+    TRUE ~ site
+  )) %>% 
+  select(1:5)
+
+
+morphs = read_csv(here("data", "soil_core_morphotyping - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>%
+  mutate(row = toupper(row)) %>% 
+  left_join(tips) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(core_ids %>% 
+              mutate(row = toupper(row)))
+
+seqs = morphs%>% 
+  filter(!is.na(class)) 
+
+
+```
+
+
+
+```{r}
+ggplot(seqs, aes(x=morphotype, fill = genus))+
+  geom_bar() +
+  facet_grid(rows = vars(elevation))
+
+ggplot(morphs, aes(x=morphotype, fill =morphotype))+
+  geom_bar()
+
+ggplot(seqs, aes(x = genus, fill = elevation))+
+  geom_bar()
+
+ggplot(seqs, aes(x = elevation, fill = genus))+
+  geom_bar()
+
+
+ggplot(core_ids, aes(x = as.factor(plate), fill = elevation ))+
+  geom_bar()
+
+
+ggplot(seqs, aes(x=tree, fill = genus))+
+  geom_bar() 
+
+ggplot(seqs, aes(x=morphotype, fill = genus))+
+  geom_bar()+
+  facet_wrap(~tree)
+```
+
+```{r, eval = FALSE}
+still_missing = sample_locations %>% 
+  left_join(morph) %>% 
+  filter(morphotype != "x")%>% 
+  filter(morphotype != "BLANK") %>% 
+  filter(is.na(sequence))
+
+missing_but_done = read_csv(here("data", "SOS redone pcr - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  rename(plate_number = old_plate, column = old_column, row = old_row) %>% 
+  select(!4:6) %>% 
+  filter(amlified_y_n == "Y") 
+
+
+missing = still_missing %>% 
+  left_join(missing_but_done)%>% 
+  filter(is.na(amlified_y_n))  %>% 
+  select(1:5)
+
+write.csv(missing, here("data", "reruns_July22.csv"))
+```
+
+
+```{r}
+redo_tips = morphs %>% 
+ filter(is.na(phylum))
+write_csv(redo_tips, here("data","redo_sangertips.csv"))
+```
+
+

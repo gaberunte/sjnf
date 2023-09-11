@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(here)
 library(janitor)
-
+library(elevatr)
 library(tidyverse)
 ```
 
@@ -20,7 +20,18 @@ wp = read_csv(here("data", "San Juan NF water potentials.csv")) %>%
   clean_names()
 mort = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv"))%>% 
   clean_names()
+branch_seqs = read_csv(here("data", "sjnf_rootbranch_tipseqs.csv")) %>% 
+  mutate(elevation = toupper(elevation)) %>% 
+  mutate(plot = str_sub(site, 2,2))
 
+dbh_df = read_csv(here("data/sjnf_dbh.csv")) %>% 
+  clean_names() %>% 
+  filter(species =="POTR") %>% 
+  mutate(dbh_in_2018 = as.numeric(dbh_in_2018)) %>% 
+  mutate(dbh_in_2023 = as.numeric(dbh_in_2023)) %>% 
+  rename(dbh2018 = dbh_in_2018, dbh2023 = dbh_in_2023) %>% 
+  mutate(growth = dbh2023-dbh2018) %>% 
+  filter(!is.na(growth))
 ```
 
 ```{r}
@@ -90,10 +101,11 @@ potr_print = potrwp %>%
   filter(year != 2018) %>% 
   group_by(elevation, plot) 
 
-write_csv(potr_print, here("data", "sample_sites.csv"))
+#write_csv(potr_print, here("data", "sample_sites.csv"))
 
 
 ```
+
 ```{r}
 
 mort.ld = mort %>% 
@@ -109,5 +121,149 @@ mpotr= mort.ld %>%
 
 
 ```
+ 
+```{r}
+wp_trees = read_csv(here("data", "sample_sites.csv")) %>% 
+  mutate(tree_long_new = paste0(elevation, plot, new_tag))%>% 
+  mutate(tree_long_old = paste0(elevation, plot, old_tag))
+  
+wp_tags_all = c(wp_trees$tree_long_new, wp_trees$tree_long_old)
+  
+bs_trees = branch_seqs %>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id)) %>% 
+  filter(!tree_long %in% wp_tags_all)
+
+
+all_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(plot = str_sub(site, 2,2))%>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id))%>% 
+  filter(!tree_long %in% wp_tags_all)
+
+all_tips_wp = read_csv(here("data", "field_tips.csv")) %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(plot = str_sub(site, 2,2))%>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id))%>% 
+  filter(tree_long %in% wp_tags_all)
+  
+```
+ 
+ 
+```{r}
+all_tips_wp
+
+branch_seqs
+
+mega.done = branch_seqs %>% 
+  left_join(all_tips_wp) %>% 
+  filter(!is.na(time_date))
+
+mega.todo = all_tips_wp %>% 
+  left_join(branch_seqs) %>% 
+  filter(is.na(plate)) %>% 
+  select(dna, tree_id, direction, replicate, plot, elevation)
+
+#write_csv(mega.todo, here("data", "remaining_wptips_fordissection_06302023.csv"))
+
+
+ggplot(mega.done, aes(x = direction, fill = Genus, color = plot))+
+  geom_bar()+
+  facet_wrap(~tree_id)
+```
+ 
+ 
+```{r elevation}
+trees = read_sf(here("gpx/waypoints/Points-point.shx")) %>% 
+  clean_names() %>% 
+  arrange(name)
+
+meas = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(!is.na(tag)) %>% 
+  dplyr::select(plot, tag) %>% 
+  mutate(elevation = str_sub(plot, 5,5)) %>% 
+  mutate(plot = str_sub(plot, 6,6)) %>% 
+  dplyr::relocate(elevation)
+
+map_trees = tibble(tag = c("1013", "751", "2431", "2143"), elevation = c("M", "M", "H", "H"), plot = c("B", "A", "E", "B")) #gabe checked using google earth
+
+
+num_trees = trees[1:61,] %>% 
+  rename(tag = name) %>% 
+  left_join(meas) %>% 
+  mutate(elevation = case_when(
+    tag == "1013" ~ "M", 
+    tag == "751" ~ "M", 
+    tag == "2431" ~ "H", 
+    tag == "2143" ~ "H", 
+    TRUE ~ elevation
+  ))%>% 
+  mutate(plot = case_when(
+    tag == "1013" ~ "B", 
+    tag == "751" ~ "A", 
+    tag == "2431" ~ "E", 
+    tag == "2143" ~ "B", 
+    TRUE ~ plot
+  ))
+
+
+cha_trees = trees[62:75,] %>% 
+  mutate(grtree = if_else(str_sub(name, 1,2)=="GR", 1, 0)) %>% 
+  mutate(elevation = case_when(
+    grtree == 1 ~ str_sub(name, 3,3),
+    grtree == 0 ~ str_sub(name, 1,1)
+  ))%>% 
+  mutate(plot = case_when(
+    grtree == 1 ~ str_sub(name, 4,4),
+    grtree == 0 ~ str_sub(name, 2,2)
+  ))%>% 
+  mutate(tag = case_when(
+    grtree == 0 ~ str_sub(name, 3,4), 
+    TRUE ~ name
+  ))
+
+all_trees = bind_rows(num_trees, cha_trees) %>% 
+  dplyr::select(tag, geometry, elevation, plot)
+
+plot_elev_prep = all_trees %>% 
+  group_by(elevation, plot) %>% 
+  summarise(geometry = mean(geometry)) %>% 
+  mutate(geometry = st_centroid(geometry)) %>% 
+  rename(plot_elev = elevation) 
+
+plot_elev = plot_elev_prep %>% 
+  bind_cols(get_elev_point(plot_elev_prep)) %>% 
+  dplyr::select(1:5)
+
+
+dbh_df = read_csv(here("data/sjnf_dbh.csv")) %>% 
+  clean_names() %>% 
+  filter(species =="POTR") %>% 
+  mutate(dbh_in_2018 = as.numeric(dbh_in_2018)) %>% 
+  mutate(dbh_in_2023 = as.numeric(dbh_in_2023)) %>% 
+  rename(dbh2018 = dbh_in_2018, dbh2023 = dbh_in_2023) %>% 
+  mutate(growth = dbh2023-dbh2018) %>% 
+  filter(!is.na(growth)) %>% 
+  mutate(plot_elev = str_sub(plot, 5,5))%>% 
+  mutate(plot = str_sub(plot, 6,6))
+  
+
+grow_elev = dbh_df %>% 
+  left_join(plot_elev) %>% 
+  group_by(elevation, plot, plot_elev) %>% 
+  summarise(growth = mean(growth))
+
+
+
+ggplot(grow_elev, aes(x = elevation, y = growth))+
+  geom_boxplot(aes(color = plot_elev))+lims(y = c(-2, 2))
+```
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
  
 

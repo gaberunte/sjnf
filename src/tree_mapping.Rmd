@@ -15,6 +15,7 @@ library(leaflet)
 library(raster)
 library(janitor)
 library(leaflet.opacity)
+library(colorspace)
 ```
 
 ```{r}
@@ -99,4 +100,68 @@ leaflet() %>%
  #Esri.NatGeoWorldMap
 # Esri.WorldImagery
 ```
+
+
+```{r}
+nutes = read_csv(here("data", "c_n_sjnf_soil_sampling_2022.csv")) %>% 
+  clean_names() %>% 
+  rename(cton = percent_c_percent_n_ratio) %>% 
+  rename(elevation = elev)
+
+potr_nutes = nutes %>% 
+  filter(species == "POTR") %>% 
+  dplyr::select(elevation, plot, cton, wt_percent_n, wt_percent_c) %>% 
+  mutate(elev_plot = paste(elevation, plot, sep = "")) %>% 
+  filter(elev_plot != "LB")
+potr_nute_means = potr_nutes %>% 
+  group_by(elevation) %>% 
+  summarise(cton = mean(cton),
+            nitrogen = mean(wt_percent_n),
+            carbon = mean(wt_percent_c))
+
+tree_nutes = all_trees %>% 
+  left_join(potr_nutes) 
+
+
+
+#pal <- heat_hcl(12, c=c(65,0),l=c(45,95),power=c(1/3,1.5))
+
+leaflet() %>%
+  addCircleMarkers(data= tree_nutes, radius= 6, color = ~pal(tree_nutes$cton),
+    stroke = FALSE, fillOpacity = .25) %>% 
+  addProviderTiles("Esri.NatGeoWorldMap", layerId = "world")%>%
+  addScaleBar(position = "bottomright")
+  
+```
+
+```{r}
+ggplot(potr_nutes, aes(x=factor(elevation, level=c('L', 'M', 'H')), y= cton, color = elevation))+
+  geom_jitter(width = 0.25)+
+  geom_point(data= potr_nute_means, aes(x= elevation, y= cton), size = 3)+
+  labs(
+    x = "Elevation",
+    y= "C:N ratio"
+  )+ theme_minimal()+
+  scale_color_manual(breaks = c("L", "M", "H"), values = c( "darkorange3", "blueviolet",  "aquamarine4"), labels = c("Low", "Mid", "High"), name = "Elevation")
+
+#ggsave(here("figures", "cton_elevation.png"), width = 7, height = 5)
+
+
+ggplot(potr_nutes, aes(x=factor(elevation, level=c('L', 'M', 'H')), y= wt_percent_c, color = elevation))+
+  geom_jitter(width = 0.25)+
+  geom_point(data= potr_nute_means, aes(x= elevation, y= carbon), size = 3)+
+  labs(
+    x = "Elevation",
+    y= "Percent carbon"
+  )
+
+ggplot(potr_nutes, aes(x=factor(elevation, level=c('L', 'M', 'H')), y= wt_percent_n, color = elevation))+
+  geom_jitter(width = 0.25)+
+  geom_point(data= potr_nute_means, aes(x= elevation, y= nitrogen), size = 3)+
+  labs(
+    x = "Elevation",
+    y= "Percent Nitrogen"
+  )
+```
+
 
