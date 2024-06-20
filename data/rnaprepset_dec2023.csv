@@ -1,0 +1,13 @@
+tree_id,site,direction,replicate,rna
+1013,MB,South,Control,4881
+1013,MB,West,Control,4899
+1013,MB,North,Control,4993
+2602,HD,North,Control,3255
+2602,HD,West,Control,3261
+2602,HD,East,Control,3248
+1013,MB,North,2,4889
+1013,MB,South,5,4879
+1013,MB,West,5,4898
+2602,HD,East,1,3243
+2602,HD,North,3,3252
+2602,HD,West,4,3259

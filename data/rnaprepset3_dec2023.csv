@@ -1,0 +1,13 @@
+tree_id,site,direction,replicate,rna
+1425,MD,North,Control,4097
+1425,MD,West,Control,4214
+1425,MD,East,Control,4092
+2441,HE,North,Control,3045
+2441,HE,South,Control,3034
+2441,HE,West,Control,3052
+1425,MD,East,3,4088
+1425,MD,North,4,4096
+1425,MD,West,5,4213
+2441,HE,North,3,3043
+2441,HE,South,2,3029
+2441,HE,West,4,3049

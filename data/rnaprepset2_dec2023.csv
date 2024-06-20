@@ -1,0 +1,13 @@
+tree_id,site,direction,replicate,rna
+157,LE,South,Control,2068
+157,LE,East,Control,2086
+157,LE,West,Control,2074
+2127,HB,West,Control,2236
+2127,HB,South,Control,2229
+2127,HB,East,Control,2248
+157,LE,East,3,2083
+157,LE,South,1,2064
+157,LE,West,3,2072
+2127,HB,East,4,2246
+2127,HB,South,4,2227
+2127,HB,West,3,2233

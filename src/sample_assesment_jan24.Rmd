@@ -1,0 +1,265 @@
+---
+title: "Reset"
+author: "Gabe Runte"
+date: "2023-12-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(tidyverse)
+```
+
+## Read in data
+```{r}
+folder = "data/sanger/assembly_jan05_2024" # most recent contig assembly
+
+field_tips = read_csv(here("data", "field_tips.csv")) %>% rename(sample = dna) %>% 
+  mutate(tree_long = paste(site, tree_id, sep = "_"))
+dissected_tips = read_csv(here("data", "dissect_master.csv")) %>% 
+  left_join(field_tips)
+seqs_long = read_csv(here(folder, "all_branch_seqs.csv")) %>% 
+  clean_names()
+guilds = read_csv(here(folder, "branch_ff.guilds.csv")) %>% 
+  clean_names() %>% 
+  select(sample, guild)
+seqs = seqs_long %>% 
+  select(sample, site, direction, tree_id, replicate, percent_hq, genus, species, elevation) %>% 
+  filter(!is.na(genus)) %>% 
+  left_join(guilds) %>% 
+  filter(str_detect(guild, "Ectomycorrhizal")) %>% 
+  group_by(sample) %>%
+  arrange(genus) %>% 
+  slice(1) %>% 
+  ungroup()%>% 
+  mutate(tree_long = toupper(paste(elevation, site, "_",tree_id, sep = "")))
+
+wp_trees = read_csv(here("data", "sample_sites.csv")) %>% 
+  mutate(tree_long_new = paste0(elevation, plot, new_tag))%>% 
+  mutate(tree_long_old = paste0(elevation, plot, old_tag))
+  
+wp_tags_all = c(wp_trees$tree_long_new, wp_trees$tree_long_old)
+
+all_tips_wp = read_csv(here("data", "field_tips.csv")) %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(plot = str_sub(site, 2,2))%>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id))%>% 
+  filter(tree_long %in% wp_tags_all) %>% 
+  rename(sample = dna)
+
+wp = all_tips_wp %>% 
+  select(sample) %>% 
+  mutate(water_potential = TRUE)
+```
+
+## Derivative datasets
+```{r}
+controls = dissected_tips %>% 
+  filter(replicate == "Control") %>% 
+  select(sample, site, direction,tree_id) %>% 
+  mutate(tree_long = paste(site, tree_id, sep = "_")) %>% 
+  left_join(seqs) 
+sterile_controls = controls %>% 
+  filter(is.na(genus))
+
+
+pick_seqs = seqs %>% 
+  mutate(tree_long = paste(site, tree_id, sep = "_")) %>% 
+  group_by(tree_long, direction) %>% 
+  arrange(genus) %>% 
+  slice(1) %>% 
+  filter(!is.na(genus)) %>% 
+  mutate(livetip = "Yes") %>% 
+  select(tree_long, direction, livetip)
+  
+  
+  seqs_long %>% 
+  select(sample, site, direction, tree_id, replicate, percent_hq, genus, species) %>% 
+  filter(!is.na(genus)) %>% 
+  left_join(guilds) %>% 
+  filter(str_detect(guild, "Ectomycorrhizal")) %>% 
+  group_by(sample) %>% 
+  sample_n(1) %>% 
+  ungroup()
+```
+
+
+```{r}
+dissect_trees = expand_grid(tree_long = unique(dissected_tips$tree_long), direction = unique(field_tips$direction)) %>% 
+  left_join(sterile_controls %>% select(tree_long, direction) %>%  mutate(control = "Yes") %>% 
+              group_by(tree_long, direction) %>%  slice(1))
+
+all4controls = dissect_trees %>% 
+  filter(! tree_long %in% dissect_trees$tree_long[is.na(dissect_trees$control)]) %>% 
+  mutate(elevation = tolower(str_sub(tree_long, 1,1))) %>% 
+  left_join(pick_seqs)
+
+three_pairs = all4controls %>% 
+  group_by(tree_long) %>% 
+  summarise(tips = sum(livetip == "Yes", na.rm = T))
+  
+```
+
+
+```{r}
+trees = unique(dissected_tips$tree_long)
+control_tips = dissected_tips %>% 
+  filter(replicate == "Control") %>% 
+  select(sample, tree_long, replicate, direction) %>% 
+  left_join(seqs %>%  select(sample, genus)) %>% 
+  group_by(sample) %>%  arrange(genus) %>% slice(1) %>% 
+  ungroup() %>% 
+  mutate(sterile = case_when(
+    is.na(genus) ~ "Yes",
+    .default = genus
+  )) %>% 
+  select(-genus, replicate, -sample) %>% 
+  mutate(direction = paste0("Cont_", direction))
+
+control_tips_wide = control_tips %>% 
+  pivot_wider(names_from = direction, values_from = sterile)
+
+best_tips = seqs %>% 
+  filter(replicate != "Control") %>% 
+  mutate(hq = 0.01* as.numeric(str_sub(percent_hq, 1, -2)))%>% 
+  group_by(tree_long, direction)  %>% arrange(-hq) %>% 
+  slice(1) %>% ungroup() %>% 
+  left_join(wp)%>% 
+  select(tree_long, direction, hq, water_potential) %>% 
+  mutate(direction = paste0("live_", direction)) 
+
+best_tips_wide = best_tips %>% 
+  pivot_wider(names_from = direction, values_from = hq)
+  
+
+widetree = tibble(tree_long = trees) %>% 
+  drop_na() %>% 
+  left_join(control_tips_wide) %>% 
+  left_join(best_tips_wide) %>% 
+  mutate(elevation = str_sub(tree_long, 1,1))%>% 
+  mutate(site = str_sub(tree_long, 2,2)) 
+
+widetree_hist = widetree %>% 
+  pivot_longer(cols = 7:10, names_to = "live_direction", values_to = "live_hq")
+
+ggplot(widetree_hist, aes(x = live_hq, fill= elevation))+
+  geom_histogram()+facet_wrap(~elevation)
+```
+
+
+```{r}
+set.seed(90210)
+manual = tibble(
+  tree_long = c("LD_248", "LD_248", 
+           "MD_1411", "MD_1411", 
+           "HB_2143", "HB_2143",
+           "HC_2815", "HC_2815", "HC_2815", "HC_2815",
+           "LC_114", "LC_114", "LC_114", "LC_114",
+           "LF_402", "LF_402",
+           "LG_GRLG1", "LG_GRLG1", "LG_GRLG1", "LG_GRLG1",
+           "MA_779", "MA_779", "MA_779", "MA_779"),
+  direction = c("East", "West",
+                "East", "West",
+                "East", "North",
+                "North", "East", "South", "West",
+                "North", "East", "South", "West",
+                 "East", "South",
+                "North", "East", "South", "West",
+                "North", "East", "South", "West")
+) %>% 
+  left_join(field_tips %>%  select(tree_long, direction, sample, replicate)) %>% 
+  left_join(dissected_tips %>%  select(sample) %>% mutate(dissect = TRUE) %>%  distinct()) %>% 
+  filter(replicate != "Control") %>% 
+  group_by(tree_long, direction) %>% 
+  sample_n(3) %>% 
+  ungroup() %>% 
+  arrange(sample)%>% 
+  mutate(newplate = "D19") %>% 
+  mutate(newcolumn = rep(1:12, each = 8, length.out = n()))%>% 
+  mutate(newrow = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), length.out = n()))
+
+
+#write_csv(manual, here("data", "d19_dissect.csv"))
+
+```
+
+
+```{r}
+
+#HD and MB have plenty of success, so we can use their spares
+prepset = field_tips %>% 
+  filter(! tree_long %in% widetree$tree_long) %>% 
+  filter(site %in% c("HD", "MB"))
+
+prepcont = prepset %>% 
+  filter(replicate == "Control") %>% 
+  group_by(tree_id) %>% 
+  sample_n(3)
+
+preplive = prepset %>% 
+  filter(replicate != "Control") %>% 
+  left_join(prepcont %>% select(tree_id, direction) %>% mutate(cont = T)) %>% 
+  filter(cont == T) %>% 
+  group_by(tree_id, direction) %>% 
+  sample_n(1)
+
+prepprint = bind_rows(prepcont, preplive) %>% 
+  select(tree_id, site, direction, replicate, rna)
+
+#write_csv(prepprint,here("data", "rnaprepset_dec2023.csv"))
+
+
+# I wont use HB_2127 or LE_157 because their control tips are bad. 
+prepset2 = field_tips %>% 
+  filter(tree_long %in% c("HB_2127", "LE_157")) 
+
+prepcont2 = prepset2 %>% 
+  filter(replicate == "Control") %>% 
+  group_by(tree_id) %>% 
+  sample_n(3)
+
+preplive2 = prepset2 %>% 
+  filter(replicate != "Control") %>% 
+  left_join(prepcont2 %>% select(tree_id, direction) %>% mutate(cont = T)) %>% 
+  filter(cont == T) %>% 
+  group_by(tree_id, direction) %>% 
+  sample_n(1)
+
+prepprint2 = bind_rows(prepcont2, preplive2) %>% 
+  select(tree_id, site, direction, replicate, rna)
+
+#write_csv(prepprint2,here("data", "rnaprepset2_dec2023.csv"))
+
+
+# I also wont use MD_1425 or HE_2441 because their control tips are bad. 
+
+prepset3 = field_tips %>% 
+  filter(tree_long %in% c("MD_1425", "HE_2441")) 
+
+prepcont3 = prepset3 %>% 
+  filter(replicate == "Control") %>% 
+  group_by(tree_id) %>% 
+  sample_n(3)
+
+preplive3 = prepset3 %>% 
+  filter(replicate != "Control") %>% 
+  left_join(prepcont3 %>% select(tree_id, direction) %>% mutate(cont = T)) %>% 
+  filter(cont == T) %>% 
+  group_by(tree_id, direction) %>% 
+  sample_n(1)
+
+prepprint3 = bind_rows(prepcont3, preplive3) %>% 
+  select(tree_id, site, direction, replicate, rna)
+
+#write_csv(prepprint3,here("data", "rnaprepset3_dec2023.csv"))
+
+```
+
+
+
+
+
+
+

@@ -1,0 +1,141 @@
+---
+title: "Control tips"
+author: "Gabe Runte"
+date: "2023-12-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(tidyverse)
+```
+
+```{r}
+dissect = read_csv(here("data/dissect_samplesheet.csv")) %>% 
+  mutate(row = toupper(row)) %>% 
+  mutate(plate_cr = paste0(plate, column, row))
+branches = read_csv(here("data", "branch_sequences_dec2023.csv")) %>% 
+  clean_names() %>% 
+  distinct(plate, column, row, .keep_all = TRUE)
+tips = read_csv(here("data/field_tips.csv")) %>% 
+  select(!rna) %>% 
+  rename(sample = dna)%>% 
+  distinct(sample, .keep_all = TRUE)
+
+```
+
+```{r}
+df = dissect %>% 
+  filter(sample!=0) %>% 
+  group_by(sample) %>%
+  slice(n()) %>%
+  ungroup() %>% 
+  left_join(tips %>% select(!time_date)) %>% 
+  left_join(branches %>% select(1:4, genus, species)) %>% 
+  mutate(genus_fail = case_when(
+    is.na(genus)~ "failed",
+    !is.na(genus) ~ "fungal"
+  )) %>% 
+  filter(!is.na(replicate))
+
+
+ggplot(df, aes(x = replicate, fill= genus_fail))+
+  geom_bar()+facet_wrap(~tree_id)
+
+control = df %>% 
+  filter(replicate =="Control") %>% 
+  group_by(tree_id) %>% 
+  mutate(tree = paste(site, tree_id, sep = "_")) %>% 
+  mutate(direction = str_sub(direction, 1,1)) %>% 
+  mutate(direction = fct_relevel(direction, c("N", "E", "S", "W")))
+
+ggplot(control, aes(x = direction, fill= genus_fail))+
+  geom_bar()+facet_wrap(~tree)
+ggplot(control, aes(x = tree, fill= genus_fail))+
+  geom_bar()
+```
+
+```{r}
+# %>% 
+#   left_join(tips %>% select(!time_date)) 
+df_trub = dissect  %>% 
+  filter(sample!=0) %>% 
+  group_by(sample) %>%
+  slice(n()) %>%
+  ungroup() 
+```
+
+
+```{r}
+ggplot(branches, aes(x = tree_id, fill = genus))+
+  geom_bar()+facet_grid(elevation~ tree_id, scales = "free")
+```
+## Let's see which control tips I should target
+```{r}
+ctips = read_csv(here("data/field_tips.csv")) %>% 
+  select(!rna) %>% 
+  rename(sample = dna) %>% 
+  filter(replicate == "Control") %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(ele_tag = paste(elevation, tree_id, sep = "_"))
+
+wp_trees = read_csv(here("data", "sample_sites.csv")) %>%  
+  mutate(tree_long_new = paste(elevation, new_tag, sep = "_"))%>% 
+  mutate(tree_long_old = paste(elevation, old_tag, sep = "_"))
+  
+wp_tags_all = c(wp_trees$tree_long_new, wp_trees$tree_long_old)
+
+wp_control = ctips %>% 
+  filter(ele_tag %in% wp_tags_all)
+
+#priority 1
+wp_undone = wp_control %>% 
+  filter(sample %in% branches$sample)
+
+
+
+
+#priority 2
+#which trees do I already have sequences for? 
+alltips = read_csv(here("data/field_tips.csv")) %>% 
+  select(!rna) %>% 
+  rename(sample = dna)  %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(ele_tag = paste(elevation, tree_id, sep = "_"))
+
+unique(alltips$ele_tag)
+
+#which trees in this set have I dissected <4 control tips from? 
+con_missing = control%>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(ele_tag = paste(elevation, tree_id, sep = "_")) %>% 
+  group_by(ele_tag) %>% 
+  summarize(n = n()) %>% 
+  filter(n<4)
+
+#which tips do I already have to look through?
+branch_con = branches %>% 
+  mutate(elevation = toupper(elevation))%>% 
+  mutate(ele_tag = paste(elevation, tree_id, sep = "_")) 
+
+tips_missing = alltips %>% 
+  filter(ele_tag %in% con_missing$ele_tag) %>% 
+  filter(!sample %in% control$sample) %>% 
+  filter(replicate == "Control")
+  
+
+```
+
+```{r}
+control_dissections = bind_rows(wp_undone, tips_missing) %>% 
+  arrange(sample) %>% 
+  mutate(comb_column = rep(1:12, each = 8, length.out = n()))%>% 
+  mutate(comb_row = rep(c("A", "B", "C", "D", "E", "F", "G", "H"),  length.out = n())) 
+
+write_csv(control_dissections, here("data", "controltip_dissectset_dec2023.csv"))
+```
+
+

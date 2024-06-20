@@ -1,0 +1,369 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+library(bioseq)
+library(DECIPHER)
+library(patchwork)
+library(tidyverse)
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, message = F}
+folder = "data/sanger/assembly_dec21_2023"
+
+consensus = read_csv(here(folder, "consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  dplyr::rename(sequence_list_name = name)
+
+untrimmed = read_csv(here(folder, "all_seqs_untrimmed.csv"))%>% 
+  clean_names() %>% 
+  separate(name, into = c("sjnf", "plate",  "column", "row")) %>% 
+  filter(str_sub(plate, 1,1)=="D") %>% 
+  mutate(pcr = paste0(plate, row, column))
+
+contig_assign = read_csv(here(folder, "contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here(folder, "all_seqs.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  select(!sequence_list_name) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  ))%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence))
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/unite/sh_general_release_dynamic_25.07.2023.fasta"
+unique_sequences = unique(metadata$sequence) # using consensus seqs (change to 'originial_seq' for ASV)
+#unique_sequences = unique(metadata$original_seq) 
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE) 
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(sequence = rownames(tiptaxa))
+write_csv(unite_taxa, here(folder, "all_unite_taxa.csv"))
+#write_csv(unite_taxa, here(folder, "all_unite_taxa_nocontigs.csv"))
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+unite_taxa = read_csv(here(folder, "all_unite_taxa.csv")) 
+field_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  rename(sample = dna)
+dissected_tips = read_csv(here("data", "dissect_master.csv")) %>% 
+  left_join(field_tips %>%  select(sample, site, direction, replicate, tree_id )) %>% 
+  mutate(elevation = tolower(str_sub(site, 1,1))) %>% 
+  mutate(site = tolower(str_sub(site, 2,2)))
+
+#poorly named sequences
+should_be_names = read_csv(here("data", "pcr_success_sequencing_sheet_naming.csv")) %>% 
+  rename(filename = "...7")%>% 
+  separate(filename, into = c("sjnf", "p", "plate", "c", "column", "r", "row"), remove = F) %>% 
+  mutate(position = rep(1:96, length.out = 236)) %>% 
+  mutate(plate = as.numeric(str_sub(new_plate, 7,7))) %>% 
+  select(filename, plate, position)
+
+tip_seqs = metadata %>%
+  left_join(unite_taxa) %>% 
+  mutate(samset = case_when(
+    str_sub(name, 6,6) == "p" ~ "cores",
+    str_sub(name, 6,6) == "D" ~ "branches",
+    str_sub(name, 1,1) == "p" ~ "misnamed"))
+
+misnamed = tip_seqs %>% 
+  filter(samset == "misnamed") %>% 
+  separate(name, into = c("plate",  "position"))%>% 
+  mutate(plate = as.numeric(str_sub(plate, 2,2))) %>% 
+  mutate(position = as.numeric(position)) %>% 
+  left_join(should_be_names) %>% 
+  rename(name = filename) %>% 
+  mutate(samset = "cores")
+
+cores = tip_seqs %>% 
+  filter(samset == "cores") %>% 
+  bind_rows(misnamed) %>% 
+  separate(name, into = c("sjnf", "p", "plate", "c", "column", "r", "row")) %>% 
+  select(!sjnf) %>% select(!p) %>% select(!c) %>% select(!r) %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>% 
+  select(!position)
+
+branches = tip_seqs %>% 
+  filter(samset == "branches")%>% 
+  separate(name, into = c("sjnf", "plate",  "column", "row")) %>% 
+  select(!sjnf)%>% 
+  mutate(column = as.numeric(column)) %>% 
+  mutate(row = case_when(
+    row == 1 ~ "A",
+    TRUE ~ row
+  ))
+
+```
+
+```{r}
+all_trees = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(str_sub(plot, 1, 4) == "POTR") 
+
+tree_meta = all_trees %>% 
+  select(plot, tag) %>% 
+  mutate(elevation = tolower(str_sub(plot, 5, 5)))%>% 
+  mutate(site = tolower(str_sub(plot, 6, 6))) %>% 
+  select(!plot) %>% 
+  rename(tree= tag) %>% 
+  rename(tree_id = tree)
+
+field_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  select(site, tree_id, direction, dna, replicate) %>% 
+  rename(sample = dna) %>% 
+  mutate(elevation = tolower(str_sub(site, 1,1)))%>% 
+  mutate(site = tolower(str_sub(site, 2,2)))
+
+core_ids = read_csv(here("data", "soil_core_treeids - Sheet1.csv")) %>%
+  left_join(tree_meta %>% 
+              rename(tree = tree_id), by = "tree") %>%
+  rename(elevation = elevation.x) %>%
+  rename(site = site.x) %>%
+  mutate(elevation = case_when( 
+    is.na(elevation) ~ elevation.y,
+    TRUE ~ elevation
+  ))%>%
+  mutate(site = case_when(
+    is.na(site) ~ site.y,
+    TRUE ~ site
+  )) %>%
+  select(1:5) %>%
+  mutate(row = toupper(row)) %>%
+  mutate(plate = as.numeric(plate))
+
+
+core_morphs = read_csv(here("data", "soil_core_morphotyping - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>%
+  mutate(row = toupper(row)) %>% 
+  left_join(cores) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(core_ids) %>% 
+  filter(!is.na(percent_hq))%>% 
+  filter(!is.na(elevation))%>% 
+  mutate(elevation = factor(elevation, levels=c("l","m","h")))
+
+branch_morphs = dissected_tips %>% 
+  clean_names() %>% 
+  mutate(row = toupper(row)) %>% 
+  left_join(branches) %>% 
+  filter(!is.na(samset))   %>% 
+  filter(!is.na(Genus)) %>% 
+  filter(!is.na(elevation))%>% 
+  mutate(elevation = factor(elevation, levels=c("l","m","h")))
+
+
+```
+
+```{r}
+ggplot(branch_morphs, aes(x = elevation, fill = Genus))+
+  geom_bar(position = "fill")
+
+branch_genera = branch_morphs %>% 
+  clean_names() %>% 
+  group_by(genus) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/length(branch_morphs$sample))
+
+top_genera = branch_genera$genus[branch_genera$n>30]
+
+ggplot(branch_morphs %>% 
+         filter(Genus %in% top_genera), aes(x = elevation, fill = Genus))+
+  geom_bar(position = "fill")
+
+
+```
+
+```{r}
+branch_ff = branch_morphs %>% 
+  clean_names() %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";"))
+
+write_csv(branch_ff %>%  select(sample, taxonomy), here(folder, "branch_ff.csv"))
+
+here(folder, "branch_ff.txt")
+```
+
+```{bash, engine.opts='-l', eval = F}
+
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/sjnf/data/sanger/assembly_dec21_2023/branch_ff.txt
+```
+
+```{r}
+branch_guilds = read_csv(here(folder, "branch_ff.guilds.csv")) %>% 
+  clean_names()
+b_ecto = branch_morphs %>% 
+  left_join(branch_guilds) %>%
+  filter(str_detect(guild, "Ectomycorrhizal"))
+
+```
+
+## water potential tips
+```{r}
+wp_trees = read_csv(here("data", "sample_sites.csv")) %>% 
+  mutate(tree_long_new = paste0(elevation, plot, new_tag))%>% 
+  mutate(tree_long_old = paste0(elevation, plot, old_tag))
+  
+wp_tags_all = c(wp_trees$tree_long_new, wp_trees$tree_long_old)
+
+all_tips_wp = read_csv(here("data", "field_tips.csv")) %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(plot = str_sub(site, 2,2))%>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id))%>% 
+  filter(tree_long %in% wp_tags_all) %>% 
+  rename(sample = dna)
+
+wp_samples = all_tips_wp %>% 
+  mutate(wp = TRUE) %>% 
+  select(sample, wp)
+```
+
+
+## Control tip inquiry
+```{r}
+control_check = dissected_tips %>%
+  left_join(field_tips) %>% 
+  filter(replicate == "Control") %>% 
+  left_join(branch_morphs %>% 
+              clean_names() %>% 
+              select(sample, genus, species)) %>% 
+  mutate(tree_site = paste(tree_id, site, sep = "_")) %>% 
+  group_by(sample, elevation, tree_site, tree_id, site) %>%
+  summarize(genus = if(any(!is.na(genus))) genus[which(!is.na(genus))[1]] else NA) %>% 
+  ungroup() %>%  # this looks for any instance where there was a genus assignment and selects that. If none assign to the genus, it chooses NA. 
+  mutate(water_potential = sample %in% all_tips_wp$sample)
+
+ggplot(control_check, aes(x = tree_site, fill = genus, color= water_potential))+
+  geom_bar()+facet_wrap(~elevation, scales = "free")
+```
+
+1. Make a list of all of the trees I have enough control tips for.
+2. See which of those trees I have enough identified tips from to make a set. 
+3. Compare those sets to look at the variability within and between elevations? 
+4. Fill out the sample set up to 7-8 trees per elevation band. 
+
+```{r}
+control3plus = control_check %>% 
+  filter(is.na(genus)) %>% 
+  group_by(tree_id, site, elevation) %>% 
+  summarise(n = n()) %>% 
+  filter(n>2)%>% 
+  mutate(tree_site = paste(tree_id, site, sep = "_"))
+
+control3plus %>% 
+  group_by(elevation) %>% 
+  summarize(n = n())
+
+seq_branches = branch_morphs %>% 
+  mutate(tree_site = paste(tree_id, site, sep = "_"))%>% 
+  filter(tree_site %in% control3plus$tree_site ) %>% 
+  filter(replicate != "Control") %>% 
+  filter(Genus %in% b_ecto$Genus)
+
+newset = branch_morphs %>% 
+  filter(plate %in% c("D15", "D16", "D17", "D18"))%>% 
+  mutate(tree_site = paste(tree_id, site, sep = "_"))%>% 
+  filter(tree_site %in% control3plus$tree_site )%>% 
+  filter(replicate != "Control") %>% 
+  filter(Genus %in% b_ecto$Genus)
+
+ggplot(seq_branches, aes(x = tree_site, fill = Genus))+
+  geom_bar()+facet_wrap(~elevation, scales = "free")
+
+ggplot(seq_branches, aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation), cols = vars(tree_site), scales = "free")
+
+ggplot(seq_branches %>% 
+         filter(elevation == "l"), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(site), cols = vars(tree_site), scales = "free")
+ggplot(seq_branches %>% 
+         filter(elevation == "m"), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(site), cols = vars(tree_site), scales = "free")
+ggplot(seq_branches %>% 
+         filter(elevation == "h"), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(site), cols = vars(tree_site), scales = "free")
+
+ggplot(seq_branches, aes(x = tree_site, fill = plate))+
+  geom_bar()+facet_wrap(~elevation, scales = "free")
+ggplot(seq_branches, aes(x = tree_site, fill = site))+
+  geom_bar()+facet_wrap(~elevation, scales = "free")
+```
+
+## From the most recent set, which trees were successful and which were not
+```{r}
+newtips = dissected_tips %>% 
+  filter(plate %in% c("D15", "D16", "D17", "D18")) %>% 
+  left_join(branch_morphs) %>% 
+  mutate(column = as.character(column)) %>% 
+  mutate(pcr = paste0(plate, row, column)) 
+
+goodseq = newtips %>% 
+  filter(!is.na(Genus)) %>% 
+  mutate(set = "good_seq")
+badseq = untrimmed %>% 
+  filter(! pcr %in% goodseq$pcr)%>% 
+  mutate(set = "bad_seq")
+noamp = newtips %>% 
+  filter(! pcr %in% goodseq$pcr)%>% 
+  filter(! pcr %in% badseq$pcr) %>% 
+  mutate(set = "no_amp")
+
+newlong  =bind_rows(goodseq, badseq, noamp) %>% 
+  filter(plate %in% c("D15", "D16", "D17", "D18")) %>% 
+  select(plate, column, row, set, Genus) %>% 
+  left_join(dissected_tips %>% 
+              mutate(column = as.character(column)))
+
+  
+
+
+ggplot(newtips %>% 
+         filter(replicate != "Control"), aes(x = tree_id, fill = Genus))+
+  geom_bar()
+
+ggplot(newtips , aes(x = tree_id, fill = Genus))+
+  geom_bar()
+ggplot(newtips %>% 
+         filter(!is.na(Genus)), aes(x = tree_id, fill = Genus))+
+  geom_bar()+facet_wrap(~elevation, scales = "free")
+
+ggplot(newlong , aes(x = plate, fill = set))+
+  geom_bar()
+
+ggplot(newlong %>% 
+         filter(replicate != "Control"), aes(x = plate, fill = set))+
+  geom_bar()
+```

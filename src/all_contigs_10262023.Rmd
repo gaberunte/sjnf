@@ -1,0 +1,435 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+library(bioseq)
+library(DECIPHER)
+library(tidyverse)
+library(patchwork)
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, message = F}
+folder = "data/sanger/assembly_oct26_2023"
+
+consensus = read_csv(here(folder, "consensus_seqs.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here(folder, "contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here(folder, "all_seqs.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  select(!sequence_list_name) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  ))%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence))
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/unite/sh_general_release_dynamic_25.07.2023.fasta"
+#unique_sequences = unique(metadata$sequence) # using consensus seqs (change to 'originial_seq' for ASV)
+unique_sequences = unique(metadata$original_seq) 
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE) 
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(original_seq = rownames(tiptaxa))
+write_csv(unite_taxa, here(folder, "all_unite_taxa_nocontigs.csv"))
+#write_csv(unite_taxa, here(folder, "all_unite_taxa.csv"))
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+unite_taxa = read_csv(here(folder, "all_unite_taxa_nocontigs.csv")) 
+
+field_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  rename(sample = dna)
+dissected_tips_raw = read_csv(here("data", "dissect_samplesheet.csv")) %>% 
+  mutate(sample = as.numeric(sample)) %>% 
+  mutate(row = toupper(row)) 
+
+redo_mapping = read_csv(here("data/d0607_redos.csv")) %>% 
+  rename(plate = sjnf_plate) %>% 
+  rename(column = old_column) %>% 
+  rename(row = old_well) %>% 
+  left_join(dissected_tips_raw) %>% 
+  select(1,5:7) %>% 
+  mutate(plate = "D0607redos") %>% 
+  rename(column = new_column, row = new_well)
+
+dissected_tips = dissected_tips_raw %>% 
+  bind_rows(redo_mapping)
+
+#poorly named sequences
+should_be_names = read_csv(here("data", "pcr_success_sequencing_sheet_naming.csv")) %>% 
+  rename(filename = "...7")%>% 
+  separate(filename, into = c("sjnf", "p", "plate", "c", "column", "r", "row"), remove = F) %>% 
+  mutate(position = rep(1:96, length.out = 236)) %>% 
+  mutate(plate = as.numeric(str_sub(new_plate, 7,7))) %>% 
+  select(filename, plate, position)
+
+tip_seqs = metadata %>%
+  left_join(unite_taxa) %>% 
+  mutate(samset = case_when(
+    str_sub(name, 6,6) == "p" ~ "cores",
+    str_sub(name, 6,6) == "D" ~ "branches",
+    str_sub(name, 1,1) == "p" ~ "misnamed"
+  ))
+
+misnamed = tip_seqs %>% 
+  filter(samset == "misnamed") %>% 
+  separate(name, into = c("plate",  "position"))%>% 
+  mutate(plate = as.numeric(str_sub(plate, 2,2))) %>% 
+  mutate(position = as.numeric(position)) %>% 
+  left_join(should_be_names) %>% 
+  rename(name = filename) %>% 
+  mutate(samset = "cores")
+
+cores = tip_seqs %>% 
+  filter(samset == "cores") %>% 
+  bind_rows(misnamed) %>% 
+  separate(name, into = c("sjnf", "p", "plate", "c", "column", "r", "row")) %>% 
+  select(!sjnf) %>% select(!p) %>% select(!c) %>% select(!r) %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>% 
+  select(!position)
+
+branches = tip_seqs %>% 
+  filter(samset == "branches")%>% 
+  separate(name, into = c("sjnf", "plate",  "column", "row")) %>% 
+  select(!sjnf)%>% 
+  mutate(column = as.numeric(column)) %>% 
+  mutate(row = case_when(
+    row == 1 ~ "A",
+    TRUE ~ row
+  )) %>% 
+  left_join(dissected_tips) %>% 
+  left_join(field_tips %>% 
+              select(!c(rna, time_date)))
+
+```
+
+```{r, message = F}
+all_trees = read_csv(here("data", "SJNF_plot surveys - SJNF_plot surveys.csv")) %>% 
+  filter(str_sub(plot, 1, 4) == "POTR") 
+
+tree_meta = all_trees %>% 
+  select(plot, tag) %>% 
+  mutate(elevation = tolower(str_sub(plot, 5, 5)))%>% 
+  mutate(site = tolower(str_sub(plot, 6, 6))) %>% 
+  select(!plot) %>% 
+  rename(tree= tag) %>% 
+  rename(tree_id = tree)
+
+branch_tips = read_csv(here("data", "field_tips.csv")) %>% 
+  select(site, tree_id, direction, dna, replicate) %>% 
+  rename(sample = dna) %>% 
+  mutate(elevation = tolower(str_sub(site, 1,1)))%>% 
+  mutate(site = tolower(str_sub(site, 2,2)))
+
+core_ids = read_csv(here("data", "soil_core_treeids - Sheet1.csv")) %>%
+  left_join(tree_meta %>% 
+              rename(tree = tree_id), by = "tree") %>%
+  rename(elevation = elevation.x) %>%
+  rename(site = site.x) %>%
+  mutate(elevation = case_when(
+    is.na(elevation) ~ elevation.y,
+    TRUE ~ elevation
+  ))%>%
+  mutate(site = case_when(
+    is.na(site) ~ site.y,
+    TRUE ~ site
+  )) %>%
+  select(1:5) %>%
+  mutate(row = toupper(row)) %>%
+  mutate(plate = as.numeric(plate))
+
+
+core_morphs = read_csv(here("data", "soil_core_morphotyping - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column)) %>%
+  mutate(row = toupper(row)) %>% 
+  left_join(cores) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(core_ids) %>% 
+  filter(!is.na(percent_hq))%>% 
+  filter(!is.na(elevation))%>% 
+  mutate(elevation = factor(elevation, levels=c("l","m","h")))
+
+branch_morphs = read_csv(here("data", "dissect_samplesheet.csv")) %>% 
+  clean_names() %>% 
+  mutate(row = toupper(row)) %>% 
+  left_join(branches) %>% 
+  filter(!is.na(percent_hq))  %>% 
+  left_join(branch_tips %>% 
+              select(!site)) %>% 
+  filter(!is.na(Genus)) %>% 
+  filter(!is.na(elevation))%>% 
+  mutate(elevation = factor(elevation, levels=c("l","m","h")))
+
+
+```
+
+```{r}
+total = core_morphs %>%
+  mutate(plate = as.character(plate)) %>% 
+  bind_rows(branch_morphs) %>% 
+  clean_names()
+
+russ_trees = branch_morphs %>% 
+  filter(Genus == "g__Russula") %>% 
+  select(site, tree_id, Genus) %>% 
+  distinct() %>% 
+  filter(!is.na(tree_id)) %>% 
+  mutate(elevation = tolower(str_sub(site, 1,1)))%>% 
+  mutate(site = tolower(str_sub(site, 2,2)))
+```
+
+```{r}
+russ_samples = total %>% 
+  filter(genus == "g__Russula") %>% 
+  filter(samset == "branches") %>% 
+  filter(!is.na(species))
+```
+
+
+```{r}
+ggplot(branch_morphs, aes(x = elevation, fill = Genus))+
+  geom_bar(position = "fill")
+
+branch_genera = branch_morphs %>% 
+  clean_names() %>% 
+  group_by(genus) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/length(branch_morphs$sample))
+
+top_genera = branch_genera$genus[branch_genera$n>30]
+
+ggplot(branch_morphs %>% 
+         filter(Genus %in% top_genera), aes(x = elevation, fill = Genus))+
+  geom_bar(position = "fill")
+
+
+russ_spe = ggplot(branch_morphs %>% 
+         filter(Genus == "g__Russula"), aes(x = elevation, fill = Species))+
+  geom_bar(position = "fill")+ labs(title = "Russula by 'species'")
+
+russ_con = ggplot(branch_morphs %>% 
+         filter(Genus == "g__Russula"), aes(x = elevation, fill = sequence_list_name))+
+  geom_bar(position = "fill")+ labs(title = "Russula by contig")
+
+russula_upslope = russ_spe+russ_con
+#ggsave(plot = russula_upslope, here("figures", "russula_chasing.png"), width = 7, height = 5)
+
+
+ggplot(branch_morphs %>% 
+         filter(Genus %in% top_genera), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+ggplot(branch_morphs %>% 
+         filter(tree_id %in% russ_trees$tree_id), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+```
+
+```{r}
+branch_ff = branch_morphs %>% 
+  clean_names() %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";"))
+
+write_csv(branch_ff %>%  select(sample, taxonomy), here(folder, "branch_ff.csv"))
+
+here(folder, "branch_ff.txt")
+```
+
+```{bash, engine.opts='-l', eval = F}
+
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/sjnf/data/sanger/assembly_oct26_2023/branch_ff.txt
+```
+
+```{r}
+branch_guilds = read_csv(here(folder, "branch_ff.guilds.csv")) %>% 
+  clean_names()
+b_ecto = branch_morphs %>% 
+  left_join(branch_guilds) %>%
+  filter(str_detect(guild, "Ectomycorrhizal")) 
+  
+ggplot(b_ecto %>% 
+         filter(Genus %in% top_genera), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+ggplot(b_ecto %>% 
+         filter(tree_id %in% russ_trees$tree_id), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+ggplot(b_ecto %>% 
+         filter(!tree_id %in% russ_trees$tree_id), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+dim(branch_morphs)
+dim(b_ecto)
+
+```
+
+
+
+Question: Do the communities sequences from soil cores adjacent to trees match the communities on root tips dissected in the field? 
+```{r}
+
+total_plotting = total %>% 
+  mutate(tree = case_when(
+    !is.na(tree) ~tree,
+    is.na(tree) ~tree_id
+  ))%>%
+  group_by(tree) %>%
+  filter(all(c("cores", "branches") %in% samset)) %>% #Here I am only interested in trees with both core and branch samples associated. Testing overlap. 
+  ungroup() %>% 
+  mutate(gensp = paste0(genus, species)) 
+  
+ggplot(total_plotting)+
+  geom_bar(aes(x = samset, fill = sequence_list_name))+
+  facet_wrap(~tree)
+
+ggplot(total_plotting)+
+  geom_bar(aes(x = samset, fill = gensp))+
+  facet_wrap(~tree)
+
+# I would say that yes, the communities to have significant overlap in species composition, though the relative abundance may differ of course.
+
+
+total_russ = total %>% 
+  filter(genus == "g__Russula") %>% 
+  mutate(gensp = paste0(genus, species)) %>% 
+  filter(!is.na(elevation))
+
+ggplot(total_russ, aes(x = elevation, fill = sequence_list_name))+
+  geom_bar()+
+  facet_wrap(~samset)
+ggplot(total_russ, aes(x = elevation, fill = tree_id))+
+  geom_bar()+
+  facet_wrap(~samset)
+  
+```
+
+
+## Sequencing in the reverse direction for Russula
+```{r}
+rev_seq = branch_morphs %>% 
+  clean_names() %>% 
+  filter(genus == "g__Russula") %>%
+  mutate(percent_hq = as.numeric(str_sub(percent_hq, end =  -2)))%>%
+  mutate(percent_lq = as.numeric(str_sub(percent_lq, end =  -2))) %>% 
+  filter(percent_hq > 10) %>% 
+  filter(sequence_length >300) %>% 
+  select(1:4) %>% 
+  arrange(plate, column, row)
+
+#write_csv(rev_seq, here("data/sanger", "russula_reverseseq.csv"))
+```
+ 
+ what do i know:
+ I have some trees that I have enough samples from
+ I know which tips I have sequences from the branches
+ I know which tips I should have sequences in all of the DXX plates
+ 
+ I need to go back and target the tips from the DXX plates that belong to trees other than the ones that either:
+ 1 - are already good enough for Russula
+ 2 - have abundant sequencing already that is not Russula (10+)
+ 
+ 3- remove all of the control tips from this set as well
+ 
+```{r}
+# which trees have > 3 russula tips
+russ_3plus = branch_morphs %>% 
+  filter(Genus == "g__Russula") %>% 
+  group_by(tree_id) %>% 
+  summarize(n = n()) %>% 
+  filter(n >=3)
+
+# which trees have > 10 sequences so far but no russula
+nonruss_10plus = branch_morphs %>% 
+  filter(!Genus == "g__Russula") %>% 
+  group_by(tree_id) %>% 
+  summarize(n = n()) %>% 
+  filter(n >=10)
+
+dissect_nov = dissected_tips_raw %>% 
+  filter(!plate %in% c("D01", "D02", "D03", "D04", "D05")) %>%  #not yet into water potential specifically
+  left_join(field_tips) %>% 
+  filter(!tree_id %in% russ_3plus$tree_id) %>% #remove trees we might already be able to use
+  filter(!tree_id %in% nonruss_10plus$tree_id)%>% #remove trees we cannot use
+  filter(!replicate == "Control") #remove control tips
+
+wp_trees = read_csv(here("data", "sample_sites.csv")) %>%  
+  mutate(tree_long_new = paste0(elevation, plot, new_tag))%>% 
+  mutate(tree_long_old = paste0(elevation, plot, old_tag))
+  
+wp_tags_all = c(wp_trees$tree_long_new, wp_trees$tree_long_old)
+
+all_tips_wp = read_csv(here("data", "field_tips.csv")) %>% 
+  mutate(elevation = str_sub(site, 1,1)) %>% 
+  mutate(plot = str_sub(site, 2,2))%>% 
+  mutate(tree_long = paste0(elevation, plot, tree_id))%>% 
+  filter(tree_long %in% wp_tags_all) #%>% 
+  # filter(!tree_id %in% russ_3plus$tree_id)
+
+
+wp_branch = branch_morphs %>% 
+  filter(tree_id %in% all_tips_wp$tree_id)
+
+ggplot(wp_branch , aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+ggplot(branch_morphs , aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+ggplot(wp_branch %>% 
+         filter(Genus == "g__Russula"), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+ggplot(branch_morphs %>% 
+         filter(Genus == "g__Russula"), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+
+ggplot(wp_branch %>% 
+         filter(tree_id %in% russ_trees$tree_id), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+ 
+ggplot(branch_morphs %>% 
+         filter(tree_id %in% russ_trees$tree_id), aes(x = direction, fill = Genus))+
+  geom_bar()+facet_grid(rows = vars(elevation),cols = vars(tree_id))
+```
+ 
+ 
+ If a tree has some russula tips (<3) and has the potential to make the list, I should target it. 
+ (i.e. if the %russula_so_far * n_tips remaining can get us to 3 tips of Russula)
+ 
+ 
+ 

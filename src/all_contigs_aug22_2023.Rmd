@@ -252,7 +252,8 @@ core_sum = core_morphs %>%
   group_by(elevation) %>% 
   summarise(n_elev = n())) %>% 
   mutate(pct_elev = n/n_elev) %>% 
-  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev.")))
+  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev."))) %>% 
+  mutate(genus = str_sub(genus, 4))
 
 
 core_plot=core_sum %>% 
@@ -262,7 +263,7 @@ ggplot(core_plot, aes(genus, y = pct_elev, fill = genus))+
   geom_bar(stat="identity")+
   facet_grid(rows = vars(elevation))+
   geom_text(aes(label = n), vjust = 1.5, colour = "white")+ 
-  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(24), breaks = unique(core_plot$genus))+
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(24), breaks = unique(core_plot$genus), name = "Taxon")+
   theme_minimal()+
   labs(
     x = "Genus",
@@ -270,7 +271,19 @@ ggplot(core_plot, aes(genus, y = pct_elev, fill = genus))+
     title = "Soil cores"
   )
 
-#ggsave(here("figures", "core_genus.png"), width = 14, height = 10)
+ggplot(core_plot, aes(genus, y = pct_elev, fill = genus))+
+  geom_bar(stat="identity")+
+  facet_grid(rows = vars(elevation))+
+  geom_text(aes(label = n), vjust = 1.5, colour = "white")+ 
+  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(24), breaks = unique(core_plot$genus), name = "Taxon")+
+  theme_minimal()+
+  labs(
+    x = "Taxon",
+    y = "Relative abundance"
+  )+
+theme(axis.text.x=element_blank())
+
+#ggsave(here("figures", "core_genus.jpg"), width = 7, height = 5)
 
 branch_morphs = branch_morphs%>% 
   filter(post_trim_length >70)
@@ -284,7 +297,8 @@ branch_sum = branch_morphs %>%
   group_by(elevation) %>% 
   summarise(n_elev = n())) %>% 
   mutate(pct_elev = n/n_elev)%>% 
-  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev.")))
+  mutate(elevation = factor(elevation, levels=c('l', 'm', 'h'), labels = c("Low Elev.", "Mid Elev.", "High Elev."))) %>% 
+  mutate(genus = str_sub(genus, 4))
 
 
 
@@ -295,7 +309,7 @@ ggplot(branch_sum %>%
   geom_bar(stat="identity")+
   facet_grid(rows = vars(elevation))+
   geom_text(aes(label = n), vjust = 1.5, colour = "white")+ 
-  scale_fill_manual(values = colorRampPalette(brewer.pal(8, "Set2"))(18), breaks = unique(branch_sum$genus))+
+  scale_fill_manual(values = colorRampPalette(brewer.pal(10, "Set2"))(18), breaks = unique(branch_sum$genus))+
   theme_minimal()+
   labs(
     x = "Genus",

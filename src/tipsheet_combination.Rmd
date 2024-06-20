@@ -17,32 +17,53 @@ library(googlesheets4)
 ```{r}
 all_sheets = gs4_find()
 
-tip_sheets = gs4_get(all_sheets$id[all_sheets$name== "Copy of sjnf_tips"])
+tip_sheets = gs4_get(all_sheets$id[all_sheets$name== "sjnf_tips"])
 
 sheet_names = tip_sheets$sheets$name
 ```
 
 ```{r}
-sheets = list()
+length(sheet_names)/3
+sheets1 = list()
 
-for(i in 1:length(sheet_names)){
-  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "Copy of sjnf_tips"], sheet = sheet_names[i])
-  
-  sheets[[i]] = spare_tib
+for(i in 1:(length(sheet_names)/3)){
+  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "sjnf_tips"], sheet = sheet_names[i])
+
+  sheets1[[i]] = spare_tib
 }
 
+sheets2 = list()
+
+for(i in 27:54){
+  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "sjnf_tips"], sheet = sheet_names[i])
+
+  sheets2[[i]] = spare_tib
+}
+sheets3 = list()
+
+for(i in 55:78){
+  spare_tib = read_sheet(all_sheets$id[all_sheets$name== "sjnf_tips"], sheet = sheet_names[i])
+
+  sheets3[[i]] = spare_tib
+}
+
+
+sheets = c(sheets1, sheets2[27:54], sheets3[55:78])
+length(sheets2)
 ```
 
 ```{r}
 
 megasheet = tibble(data.frame(sheets[1])) %>% 
   clean_names() %>% 
-  mutate(tree_id = as.character(tree_id))
+  mutate(tree_id = as.character(tree_id))%>% 
+    mutate(replicate = unlist(replicate))
 
 for(i in 2:length(sheets)){
   upnext = tibble(data.frame(sheets[i])) %>% 
   clean_names()%>% 
-  mutate(tree_id = as.character(tree_id))
+  mutate(tree_id = as.character(tree_id)) %>% 
+    mutate(replicate = unlist(replicate))
   
   megasheet = bind_rows(megasheet, upnext)
 }

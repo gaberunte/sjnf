@@ -176,4 +176,171 @@ redos = d06_long %>%
 
 ```
 
+```{r}
+
+D08_string = c(
+          1,0,1,0,1,0,1,1,1,1,0,1,1,1,0,1,1,1,1,1,1,1,0,1,
+          0,1,0,1,1,0,1,0,0,1,0,1,0,0,0,1,0,0,0,1,0,0,0,1,
+          0,1,0,1,0,1,0,0,1,1,1,0,0,1,0,1,1,1,1,0,1,1,1,0,
+          0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,0,1,1,0,0,1,0,1,0
+)
+d08_set = gel_to_seq(D08_string, start_at = 0, new_plate_start = 12, sjnf_plate = "D08")
+
+D09_string = c(
+          0,1,0,1,1,1,1,1,1,0,1,1,0,0,1,1,1,1,1,1,0,1,0,1,
+          1,0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,0,0,
+          0,1,1,1,0,1,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,1,
+          0,1,0,0,0,1,1,0,0,1,1,1,0,0,1,0,1,1,1,0,0,0,1,1
+)
+d09_set = gel_to_seq(D09_string, start_at = length(d08_set$new_column), new_plate_start = 12, sjnf_plate = "D09")
+
+D11_string = c(
+          0,1,1,0,1,1,0,1,0,1,1,1,1,0,0,0,0,0,1,0,1,1,0,1,
+          1,0,1,0,1,1,1,1,1,0,1,1,0,1,1,0,0,0,0,0,1,0,1,0,
+          0,0,1,0,1,0,0,1,0,0,0,0,0,0,1,1,1,1,1,0,0,1,0,0,
+          1,0,0,1,0,1,1,1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0
+)
+d11_set = gel_to_seq(D11_string, start_at = length(d08_set$new_column)+length(d09_set$new_column), new_plate_start = 12, sjnf_plate = "D11")
+
+
+oct_set = bind_rows(d08_set, d09_set, d11_set)
+
+dmc_13 = oct_set %>% 
+  filter(new_plate == "dmc_13")
+
+
+D12_string = c(
+          0,0,1,0,1,1,0,0,1,0,1,0,0,0,0,1,1,1,1,0,0,0,0,1,
+          1,0,0,1,0,1,0,1,1,1,0,1,0,0,0,0,1,0,0,1,0,0,0,0,
+          1,0,0,1,0,1,0,0,1,0,1,0,0,0,0,1,0,1,0,0,1,1,0,1,
+          1,1,1,1,0,0,1,1,0,0,0,1,1,1,1,1,0,1,1,1,1,1,1,1
+)
+d12_set = gel_to_seq(D12_string, start_at = length(dmc_13$new_column), new_plate_start = 13, sjnf_plate = "D12")
+
+dmc_14 = d12_set%>% 
+  filter(new_plate == "dmc_14")
+
+D10_string = c(
+          1,0,0,0,1,0,1,1,1,0,0,0,0,1,0,1,1,1,1,1,1,1,1,1,
+          1,0,0,0,1,1,0,1,1,0,1,0,0,1,1,1,0,1,1,1,1,1,1,1,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+d10_set = gel_to_seq(D10_string, start_at = length(dmc_14$new_column), new_plate_start = 14, sjnf_plate = "D10")
+
+
+oct_full_set = bind_rows(oct_set, d12_set, d10_set)
+
+#write_csv(oct_full_set, here("data/oct_mclab_dissectset.csv"))
+```
+
+```{r}
+d08_long = tibble(
+  sjnf_plate = "D08",
+  old_column = rep(1:12,each = 8),
+  old_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)
+) %>% 
+  left_join(d08_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success))
+
+d09_long = tibble(
+  sjnf_plate = "D09",
+  old_column = rep(1:12,each = 8),
+  old_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)
+) %>% 
+  left_join(d09_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success))
+
+d11_long = tibble(
+  sjnf_plate = "D11",
+  old_column = rep(1:12,each = 8),
+  old_well = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12)
+) %>% 
+  left_join(d11_set %>% 
+  select(sjnf_plate, old_column, old_well, amp_success))
+
+oct_redos = d08_long %>% 
+  bind_rows(d09_long) %>% 
+  bind_rows(d11_long) %>% 
+  filter(is.na(amp_success)) %>% 
+  mutate(new_column = rep(rep(1:12,each = 8, length.out = 96), 2)[1:length(amp_success)]) %>% 
+  mutate(new_well = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), 12), 2)[1:length(amp_success)]) %>% 
+  select(-amp_success) %>% 
+  mutate(newplate = c(rep("D12", 96), rep("D13", length(oct_redos$amp_success)-96)))
+
+d12 = oct_redos %>% 
+  filter(newplate == "D12")
+
+#write_csv(d12, here("data/dissect_d12_origins.csv"))
+```
+
+```{r}
+D15_string = c(
+          0,1,1,1,0,1,1,0,1,0,0,0,0,0,1,0,0,1,0,1,0,0,0,1,
+          0,0,1,0,0,0,0,1,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,1,
+          0,0,1,1,1,1,0,0,0,1,0,0,1,1,1,1,1,0,1,1,0,1,1,0,
+          1,0,1,1,1,0,0,0,0,0,0,1,1,1,0,0,1,0,0,0,1,1,1,0
+)
+D16_string = c(
+          1,0,0,0,0,0,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,0,1,
+          0,0,1,0,0,0,0,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1,0,0,
+          1,0,0,1,0,0,0,1,0,0,0,1,1,0,1,0,1,1,0,1,0,1,1,1,
+          1,1,1,1,1,0,0,0,0,1,0,1,0,1,1,1,0,1,0,0,0,0,0,0
+)
+D17_string = c(
+          1,0,1,0,0,1,0,0,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,
+          1,1,0,1,1,1,0,0,0,1,0,1,0,0,0,0,0,0,1,0,0,1,1,0,
+          0,0,0,0,1,0,0,0,0,0,0,1,1,1,0,1,0,0,0,1,1,0,1,0,
+          1,1,0,1,0,1,0,0,1,0,1,1,1,0,0,0,0,0,0,1,1,0,0,0
+)
+D18_string = c(
+          0,1,1,1,0,0,0,1,0,1,0,1,1,1,0,0,0,0,1,1,0,1,1,1,
+          0,1,1,0,0,0,0,0,1,1,0,0,1,0,1,0,0,0,0,1,0,1,1,0,
+          1,0,0,0,0,0,1,1,0,0,1,0,1,0,1,0,0,0,0,0,0,0,0,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+
+
+d15_set = gel_to_seq(D15_string, start_at = 0, new_plate_start = 1, sjnf_plate = "D15")
+d16_set = gel_to_seq(D16_string, start_at = nrow(d15_set), 
+                     new_plate_start = 1+floor(nrow(d15_set)/96), sjnf_plate = "D16")
+d17_set = gel_to_seq(D17_string, start_at = nrow(d15_set)+nrow(d16_set), 
+                     new_plate_start = 1+floor((nrow(d15_set)+nrow(d16_set))/96), sjnf_plate = "D17")
+d18_set = gel_to_seq(D18_string, start_at = (nrow(d15_set)+nrow(d16_set)+nrow(d17_set))-96, 
+                     new_plate_start = 2, sjnf_plate = "D18")
+
+d_dec_set = bind_rows(d15_set, d16_set, d17_set, d18_set) %>% 
+  mutate(mclab = paste("sjnf", sjnf_plate, old_column, old_well, sep = "_"))
+```
+
+
+```{r}
+dec_dissect = read_csv(here("data", "dissect_dec.csv")) %>% 
+  rename(old_column = row, old_well = column, sjnf_plate = newplate) 
+
+d_dec_final = d_dec_set %>% 
+  left_join(dec_dissect) %>% 
+  group_by(tree_id) %>% 
+  arrange(sjnf_plate, new_column, new_row) %>% 
+  ungroup()
+
+write_csv(d_dec_final %>% 
+            select(1:4, 6:8), here("data", "dec_mclab_dissectset.csv"))
+```
+
+
+```{r}
+D19_string = c(
+          1,1,0,0,1,0,0,0,1,0,1,0,1,0,0,0,0,1,0,1,1,1,1,0,
+          1,0,1,0,1,1,1,0,0,1,1,1,1,1,1,1,0,1,1,0,0,0,1,1,
+          0,0,1,0,1,0,1,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,
+          1,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+
+
+d19_set = gel_to_seq(D19_string, start_at = 0, new_plate_start = 1, sjnf_plate = "D19")
+
+#write_csv(d19_set %>%  select(1,2,4,6,7), here("data", "d19_mclabset.csv"))
+```
+
 
